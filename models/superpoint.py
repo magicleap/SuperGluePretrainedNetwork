@@ -44,8 +44,8 @@ from pathlib import Path
 import torch
 from torch import nn
 
-
-def simple_nms(scores, nms_radius):
+def simple_nms(scores, nms_radius: int):
+    """ Fast Non-maximum suppression to remove nearby points """
     assert(nms_radius >= 0)
 
     def max_pool(x):
@@ -62,21 +62,23 @@ def simple_nms(scores, nms_radius):
     return torch.where(max_mask, scores, zeros)
 
 
-def remove_borders(keypoints, scores, b, h, w):
-    mask_h = (keypoints[:, 0] >= b) & (keypoints[:, 0] < (h - b))
-    mask_w = (keypoints[:, 1] >= b) & (keypoints[:, 1] < (w - b))
+def remove_borders(keypoints, scores, border: int, height: int, width: int):
+    """ Removes keypoints too close to the border """
+    mask_h = (keypoints[:, 0] >= border) & (keypoints[:, 0] < (height - border))
+    mask_w = (keypoints[:, 1] >= border) & (keypoints[:, 1] < (width - border))
     mask = mask_h & mask_w
     return keypoints[mask], scores[mask]
 
 
-def top_k_keypoints(keypoints, scores, k):
+def top_k_keypoints(keypoints, scores, k: int):
     if k >= len(keypoints):
         return keypoints, scores
     scores, indices = torch.topk(scores, k, dim=0)
     return keypoints[indices], scores
 
 
-def sample_descriptors(keypoints, descriptors, s):
+def sample_descriptors(keypoints, descriptors, s: int = 8):
+    """ Interpolate descriptors at keypoint locations """
     b, c, h, w = descriptors.shape
     keypoints = keypoints - s / 2 + 0.5
     keypoints /= torch.tensor([(w*s - s/2 - 0.5), (h*s - s/2 - 0.5)],
@@ -91,10 +93,17 @@ def sample_descriptors(keypoints, descriptors, s):
 
 
 class SuperPoint(nn.Module):
+    """SuperPoint Convolutional Detector and Descriptor
+
+    SuperPoint: Self-Supervised Interest Point Detection and
+    Description. Daniel DeTone, Tomasz Malisiewicz, and Andrew
+    Rabinovich. In CVPRW, 2019. https://arxiv.org/abs/1712.07629
+
+    """
     default_config = {
         'descriptor_dim': 256,
         'nms_radius': 4,
-        'detection_threshold': 0.005,
+        'keypoint_threshold': 0.005,
         'max_keypoints': -1,
         'remove_borders': 4,
     }
@@ -134,6 +143,7 @@ class SuperPoint(nn.Module):
         print('Loaded SuperPoint model')
 
     def forward(self, data):
+        """ Compute keypoints, scores, descriptors for image """
         # Shared Encoder
         x = self.relu(self.conv1a(data['image']))
         x = self.relu(self.conv1b(x))
@@ -151,14 +161,14 @@ class SuperPoint(nn.Module):
         cPa = self.relu(self.convPa(x))
         scores = self.convPb(cPa)
         scores = torch.nn.functional.softmax(scores, 1)[:, :-1]
-        b, c, h, w = scores.shape
+        b, _, h, w = scores.shape
         scores = scores.permute(0, 2, 3, 1).reshape(b, h, w, 8, 8)
         scores = scores.permute(0, 1, 3, 2, 4).reshape(b, h*8, w*8)
         scores = simple_nms(scores, self.config['nms_radius'])
 
         # Extract keypoints
         keypoints = [
-            torch.nonzero(s > self.config['detection_threshold'])
+            torch.nonzero(s > self.config['keypoint_threshold'])
             for s in scores]
         scores = [s[tuple(k.t())] for s, k in zip(scores, keypoints)]
 

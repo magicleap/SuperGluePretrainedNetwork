@@ -36,23 +36,25 @@
 #
 #  Originating Authors: Paul-Edouard Sarlin
 #                       Daniel DeTone
+#                       Tomasz Malisiewicz
 #
 # %AUTHORS_END%
 # --------------------------------------------------------------------*/
 # %BANNER_END%
 
-import torch
-import time
 from pathlib import Path
-import numpy as np
-import matplotlib.pyplot as plt
+import time
 from collections import OrderedDict
+from threading import Thread
+import numpy as np
 import cv2
+import torch
+import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')
 
 
-class AverageTimer(object):
+class AverageTimer:
     """ Class to help manage printing simple timing of code execution. """
 
     def __init__(self, smoothing=0.3, newline=False):
@@ -94,15 +96,19 @@ class AverageTimer(object):
         self.reset()
 
 
-class VideoStreamer(object):
+class VideoStreamer:
     """ Class to help process image streams. Four types of possible inputs:"
         1.) USB Webcam.
         2.) An IP camera
-        3.) A directory of images (files in directory matching 'img_glob').
+        3.) A directory of images (files in directory matching 'image_glob').
         4.) A video file, such as an .mp4 or .avi file.
     """
-
-    def __init__(self, basedir, resize, skip, img_glob, maxlen=1000000):
+    def __init__(self, basedir, resize, skip, image_glob, max_length=1000000):
+        self._ip_grabbed = False
+        self._ip_running = False
+        self._ip_camera = False
+        self._ip_image = None
+        self._ip_index = 0
         self.cap = []
         self.camera = True
         self.video_file = False
@@ -111,26 +117,29 @@ class VideoStreamer(object):
         self.interp = cv2.INTER_AREA
         self.i = 0
         self.skip = skip
-        self.maxlen = maxlen
+        self.max_length = max_length
         if isinstance(basedir, int) or basedir.isdigit():
             print('==> Processing USB webcam input: {}'.format(basedir))
             self.cap = cv2.VideoCapture(int(basedir))
-            self.listing = range(0, self.maxlen)
+            self.listing = range(0, self.max_length)
         elif basedir.startswith(('http', 'rtsp')):
             print('==> Processing IP camera input: {}'.format(basedir))
             self.cap = cv2.VideoCapture(basedir)
-            self.listing = range(0, self.maxlen)
+            self.start_ip_camera_thread()
+            self._ip_camera = True
+            self.listing = range(0, self.max_length)
         elif Path(basedir).is_dir():
             print('==> Processing image directory input: {}'.format(basedir))
-            self.listing = list(Path(basedir).glob(img_glob[0]))
-            for j in range(1, len(img_glob)):
-                l = list(Path(basedir).glob(img_glob[j]))
-                self.listing = self.listing + l
+            self.listing = list(Path(basedir).glob(image_glob[0]))
+            for j in range(1, len(image_glob)):
+                image_path = list(Path(basedir).glob(image_glob[j]))
+                self.listing = self.listing + image_path
             self.listing.sort()
             self.listing = self.listing[::self.skip]
-            self.maxlen = len(self.listing)
-            if self.maxlen == 0:
-                raise IOError('No images found (maybe bad \'img_glob\' ?)')
+            self.max_length = np.min([self.max_length, len(self.listing)])
+            if self.max_length == 0:
+                raise IOError('No images found (maybe bad \'image_glob\' ?)')
+            self.listing = self.listing[:self.max_length]
             self.camera = False
         elif Path(basedir).exists():
             print('==> Processing video input: {}'.format(basedir))
@@ -140,9 +149,10 @@ class VideoStreamer(object):
             self.listing = range(0, num_frames)
             self.listing = self.listing[::self.skip]
             self.video_file = True
-            self.maxlen = len(self.listing)
+            self.max_length = np.min([self.max_length, len(self.listing)])
+            self.listing = self.listing[:self.max_length]
         else:
-            raise ValueError('Input string not recognized: '.format(basedir))
+            raise ValueError('VideoStreamer input \"{}\" not recognized.'.format(basedir))
         if self.camera and not self.cap.isOpened():
             raise IOError('Could not read camera')
 
@@ -150,7 +160,6 @@ class VideoStreamer(object):
         """ Read image as grayscale and resize to img_size.
         Inputs
             impath: Path to input image.
-            img_size: (W, H) tuple specifying resize size.
         Returns
             grayim: uint8 numpy array sized H x W.
         """
@@ -170,10 +179,20 @@ class VideoStreamer(object):
              status: True or False depending whether image was loaded.
         """
 
-        if self.i == self.maxlen:
+        if self.i == self.max_length:
             return (None, False)
         if self.camera:
-            ret, image = self.cap.read()
+
+            if self._ip_camera:
+                #Wait for first image, making sure we haven't exited
+                while self._ip_grabbed is False and self._ip_exited is False:
+                    time.sleep(.001)
+
+                ret, image = self._ip_grabbed, self._ip_image.copy()
+                if ret is False:
+                    self._ip_running = False
+            else:
+                ret, image = self.cap.read()
             if ret is False:
                 print('VideoStreamer: Cannot get image from camera')
                 return (None, False)
@@ -191,6 +210,30 @@ class VideoStreamer(object):
         self.i = self.i + 1
         return (image, True)
 
+    def start_ip_camera_thread(self):
+        self._ip_thread = Thread(target=self.update_ip_camera, args=())
+        self._ip_running = True
+        self._ip_thread.start()
+        self._ip_exited = False
+        return self
+
+    def update_ip_camera(self):
+        while self._ip_running:
+            ret, img = self.cap.read()
+            if ret is False:
+                self._ip_running = False
+                self._ip_exited = True
+                self._ip_grabbed = False
+                return
+
+            self._ip_image = img
+            self._ip_grabbed = ret
+            self._ip_index += 1
+            #print('IPCAMERA THREAD got frame {}'.format(self._ip_index))
+
+
+    def cleanup(self):
+        self._ip_running = False
 
 # --- PREPROCESSING ---
 
@@ -256,7 +299,7 @@ def estimate_pose(kpts0, kpts1, K0, K1, thresh, conf=0.99999):
         kpts0, kpts1, np.eye(3), threshold=norm_thresh, prob=conf,
         method=cv2.RANSAC)
 
-    assert(E is not None)
+    assert E is not None
 
     best_num_inliers = 0
     ret = None
@@ -270,9 +313,8 @@ def estimate_pose(kpts0, kpts1, K0, K1, thresh, conf=0.99999):
 
 
 def rotate_intrinsics(K, image_shape, rot):
-    """ image_shape is the shape of the image after rotattion
-    """
-    assert(rot <= 3)
+    """image_shape is the shape of the image after rotation"""
+    assert rot <= 3
     h, w = image_shape[:2][::-1 if (rot % 2) else 1]
     fx, fy, cx, cy = K[0, 0], K[1, 1], K[0, 2], K[1, 2]
     rot = rot % 4
@@ -374,7 +416,7 @@ def plot_image_pair(imgs, dpi=100, size=6, pad=.5):
     n = len(imgs)
     assert n == 2, 'number of images must be two'
     figsize = (size*n, size*3/4) if size is not None else None
-    fig, ax = plt.subplots(1, n, figsize=figsize, dpi=dpi)
+    _, ax = plt.subplots(1, n, figsize=figsize, dpi=dpi)
     for i in range(n):
         ax[i].imshow(imgs[i], cmap=plt.get_cmap('gray'), vmin=0, vmax=255)
         ax[i].get_yaxis().set_ticks([])
@@ -402,16 +444,25 @@ def plot_matches(kpts0, kpts1, color, lw=1.5, ps=4):
     fig.lines = [matplotlib.lines.Line2D(
         (fkpts0[i, 0], fkpts1[i, 0]), (fkpts0[i, 1], fkpts1[i, 1]), zorder=1,
         transform=fig.transFigure, c=color[i], linewidth=lw)
-        for i in range(len(kpts0))]
+                 for i in range(len(kpts0))]
     ax[0].scatter(kpts0[:, 0], kpts0[:, 1], c=color, s=ps)
     ax[1].scatter(kpts1[:, 0], kpts1[:, 1], c=color, s=ps)
 
 
 def make_matching_plot(image0, image1, kpts0, kpts1, mkpts0, mkpts1,
-                       color, text, path, name0, name1, add_keypoints=False):
+                       color, text, path, name0, name1, show_keypoints=False,
+                       fast_viz=False, opencv_display=False, opencv_title='matches'):
+
+    if fast_viz:
+        make_matching_plot_fast(image0, image1, kpts0, kpts1, mkpts0, mkpts1,
+                                color, text, path, show_keypoints, 10,
+                                opencv_display, opencv_title)
+        return
+
     plot_image_pair([image0, image1])
-    if add_keypoints:
-        plot_keypoints(kpts0, kpts1)
+    if show_keypoints:
+        plot_keypoints(kpts0, kpts1, color='k', ps=4)
+        plot_keypoints(kpts0, kpts1, color='w', ps=2)
     plot_matches(mkpts0, mkpts1, color)
 
     fig = plt.gcf()
@@ -434,8 +485,10 @@ def make_matching_plot(image0, image1, kpts0, kpts1, mkpts0, mkpts1,
     plt.close()
 
 
-def make_matching_plot_fast(image0, image1, kpts0, kpts1, mkpts0, mkpts1,
-                            color, text, add_keypoints=False, margin=10):
+def make_matching_plot_fast(image0, image1, kpts0, kpts1, mkpts0,
+                            mkpts1, color, text, path=None,
+                            show_keypoints=False, margin=10,
+                            opencv_display=False, opencv_title=''):
     H0, W0 = image0.shape
     H1, W1 = image1.shape
     H, W = max(H0, H1), W0 + W1 + margin
@@ -445,13 +498,17 @@ def make_matching_plot_fast(image0, image1, kpts0, kpts1, mkpts0, mkpts1,
     out[:H1, W0+margin:] = image1
     out = np.stack([out]*3, -1)
 
-    if add_keypoints:
+    if show_keypoints:
         kpts0, kpts1 = np.round(kpts0).astype(int), np.round(kpts1).astype(int)
-        kp_color = (255, 255, 255)
+        white = (255, 255, 255)
+        black = (0, 0, 0)
         for x, y in kpts0:
-            cv2.circle(out, (x, y), 1, kp_color, -1, lineType=cv2.LINE_AA)
+            cv2.circle(out, (x, y), 2, black, -1, lineType=cv2.LINE_AA)
+            cv2.circle(out, (x, y), 1, white, -1, lineType=cv2.LINE_AA)
         for x, y in kpts1:
-            cv2.circle(out, (x + margin + W0, y), 1, kp_color, -1,
+            cv2.circle(out, (x + margin + W0, y), 2, black, -1,
+                       lineType=cv2.LINE_AA)
+            cv2.circle(out, (x + margin + W0, y), 1, white, -1,
                        lineType=cv2.LINE_AA)
 
     mkpts0, mkpts1 = np.round(mkpts0).astype(int), np.round(mkpts1).astype(int)
@@ -460,19 +517,26 @@ def make_matching_plot_fast(image0, image1, kpts0, kpts1, mkpts0, mkpts1,
         c = c.tolist()
         cv2.line(out, (x0, y0), (x1 + margin + W0, y1),
                  color=c, thickness=1, lineType=cv2.LINE_AA)
-        if add_keypoints:
-            cv2.circle(out, (x0, y0), 2, c, -1, lineType=cv2.LINE_AA)
-            cv2.circle(out, (x1 + margin + W0, y1), 2, c, -1,
-                       lineType=cv2.LINE_AA)
+        # display line end-points as circles
+        cv2.circle(out, (x0, y0), 2, c, -1, lineType=cv2.LINE_AA)
+        cv2.circle(out, (x1 + margin + W0, y1), 2, c, -1,
+                   lineType=cv2.LINE_AA)
 
     Ht = int(H * 30 / 480)  # text height
-    if image0[Ht*len(text), :150].mean() > 200:
-        txt_color = (0, 0, 0)
-    else:
-        txt_color = (255, 255, 255)
+    txt_color_fg = (255, 255, 255)
+    txt_color_bg = (0, 0, 0)
     for i, t in enumerate(text):
         cv2.putText(out, t, (10, Ht*(i+1)), cv2.FONT_HERSHEY_DUPLEX,
-                    H*1.0/480, txt_color, 1, cv2.LINE_AA)
+                    H*1.0/480, txt_color_bg, 2, cv2.LINE_AA)
+        cv2.putText(out, t, (10, Ht*(i+1)), cv2.FONT_HERSHEY_DUPLEX,
+                    H*1.0/480, txt_color_fg, 1, cv2.LINE_AA)
+
+    if path is not None:
+        cv2.imwrite(str(path), out)
+
+    if opencv_display:
+        cv2.imshow(opencv_title, out)
+        cv2.waitKey(1)
 
     return out
 

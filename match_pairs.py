@@ -44,13 +44,13 @@
 # --------------------------------------------------------------------*/
 # %BANNER_END%
 
+from pathlib import Path
 import argparse
-import cv2
+import random
 import numpy as np
 import matplotlib.cm as cm
-from pathlib import Path
 import torch
-import random
+
 
 from models.matching import Matching
 from models.utils import (compute_pose_error, compute_epipolar_error,
@@ -83,9 +83,19 @@ if __name__ == '__main__':
         help='Maximum number of keypoints detected by Superpoint'
              ' (\'-1\' keeps all keypoints)')
     parser.add_argument(
+        '--keypoint_threshold', type=float, default=0.005,
+        help='SuperPoint keypoint detector confidence threshold')
+    parser.add_argument(
         '--nms_radius', type=int, default=4,
         help='SuperPoint Non Maximum Suppression (NMS) radius'
         ' (Must be positive)')
+    parser.add_argument(
+        '--sinkhorn_iterations', type=int, default=20,
+        help='Number of Sinkhorn iterations performed by SuperGlue')
+    parser.add_argument(
+        '--match_threshold', type=float, default=0.2,
+        help='SuperGlue match threshold')
+
     parser.add_argument(
         '--resize', type=int, nargs='+', default=[640, 480],
         help='Resize the input image before running inference. If two numbers, '
@@ -102,8 +112,25 @@ if __name__ == '__main__':
         '--show_keypoints', action='store_true',
         help='Plot the keypoints in addition to the matches')
     parser.add_argument(
-        '--pairs_list', type=str, default='assets/scannet_sample_pairs.txt',
+        '--fast_viz', action='store_true',
+        help='Use faster image visualization based on OpenCV instead of Matplotlib')
+    parser.add_argument(
+        '--viz_extension', type=str, default='png', choices=['png', 'pdf'],
+        help='Visualization file extension. Use pdf for highest-quality.')
+
+    parser.add_argument(
+        '--opencv_display', action='store_true',
+        help='Visualize via OpenCV before saving output images')
+    parser.add_argument(
+        '--pairs_list', type=str, default='assets/scannet_sample_pairs_with_gt.txt',
         help='Path to the list of image pairs')
+    parser.add_argument(
+        '--shuffle', action='store_true',
+        help='Shuffle ordering of pairs before processing')
+    parser.add_argument(
+        '--max_length', type=int, default=-1,
+        help='Maximum number of pairs to evaluate')
+
     parser.add_argument(
         '--data_dir', type=str, default='assets/scannet_sample_images/',
         help='Path to the directory that contains the images')
@@ -114,6 +141,11 @@ if __name__ == '__main__':
 
     opt = parser.parse_args()
     print(opt)
+
+    assert not (opt.opencv_display and not opt.viz), 'Must use --viz with --opencv_display'
+    assert not (opt.opencv_display and not opt.fast_viz), 'Cannot use --opencv_display without --fast_viz'
+    assert not (opt.fast_viz and not opt.viz), 'Must use --viz with --fast_viz'
+    assert not (opt.fast_viz and opt.viz_extension == 'pdf'), 'Cannot use pdf extension with --fast_viz'
 
     if len(opt.resize) == 2 and opt.resize[1] == -1:
         opt.resize = opt.resize[0:1]
@@ -129,20 +161,33 @@ if __name__ == '__main__':
 
     with open(opt.pairs_list, 'r') as f:
         pairs = [l.split() for l in f.readlines()]
-    random.Random(0).shuffle(pairs)
+
+    if opt.max_length > -1:
+        pairs = pairs[0:np.min([len(pairs), opt.max_length])]
+
+    if opt.shuffle:
+        random.Random(0).shuffle(pairs)
 
     if opt.eval:
-        if not all([len(p) == 39 for p in pairs]):
+        if not all([len(p) == 38 for p in pairs]):
             raise ValueError(
-                'All pairs should have ground truth info for evaluation')
+                'All pairs should have ground truth info for evaluation.'
+                'File \"{}\" needs 38 valid entries per row'.format(opt.pairs_list))
 
     # Load the SuperPoint and SuperGlue models.
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     print('Running inference on device \"{}\"'.format(device))
     config = {
-        'superpoint': {'max_keypoints': opt.max_keypoints,
-                       'nms_radius': opt.nms_radius},
-        'superglue': {'weights': opt.superglue}
+        'superpoint': {
+            'nms_radius': opt.nms_radius,
+            'keypoint_threshold': opt.keypoint_threshold,
+            'max_keypoints': opt.max_keypoints
+        },
+        'superglue': {
+            'weights': opt.superglue,
+            'sinkhorn_iterations': opt.sinkhorn_iterations,
+            'match_threshold': opt.match_threshold,
+        }
     }
     matching = Matching(config).eval().to(device)
 
@@ -165,9 +210,9 @@ if __name__ == '__main__':
         stem0, stem1 = Path(name0).stem, Path(name1).stem
         matches_path = results_dir / '{}_{}_matches.npz'.format(stem0, stem1)
         eval_path = results_dir / '{}_{}_evaluation.npz'.format(stem0, stem1)
-        viz_path = results_dir / '{}_{}_matches.png'.format(stem0, stem1)
+        viz_path = results_dir / '{}_{}_matches.{}'.format(stem0, stem1, opt.viz_extension)
         viz_eval_path = results_dir / \
-            '{}_{}_evaluation.png'.format(stem0, stem1)
+            '{}_{}_evaluation.{}'.format(stem0, stem1, opt.viz_extension)
 
         # Handle --cache logic.
         do_match = True
@@ -208,7 +253,7 @@ if __name__ == '__main__':
 
         # If a rotation integer is provided (e.g. from EXIF data), use it:
         if len(pair) >= 5:
-            rot0, rot1 = int(pair[3]), int(pair[4])
+            rot0, rot1 = int(pair[2]), int(pair[3])
         else:
             rot0, rot1 = 0, 0
 
@@ -244,10 +289,10 @@ if __name__ == '__main__':
 
         if do_eval:
             # Estimate the pose and compute the pose error.
-            assert len(pair) == 39, 'Pair does not have ground truth info'
-            K0 = np.array(pair[5:14]).astype(float).reshape(3, 3)
-            K1 = np.array(pair[14:23]).astype(float).reshape(3, 3)
-            T_0to1 = np.array(pair[23:]).astype(float).reshape(4, 4)
+            assert len(pair) == 38, 'Pair does not have ground truth info'
+            K0 = np.array(pair[4:13]).astype(float).reshape(3, 3)
+            K1 = np.array(pair[13:22]).astype(float).reshape(3, 3)
+            T_0to1 = np.array(pair[22:]).astype(float).reshape(4, 4)
 
             # Scale the intrinsics to resized image.
             K0 = scale_intrinsics(K0, scales0)
@@ -303,26 +348,34 @@ if __name__ == '__main__':
 
             make_matching_plot(
                 image0, image1, kpts0, kpts1, mkpts0, mkpts1, color,
-                text, viz_path, stem0, stem1, add_keypoints=opt.show_keypoints)
+                text, viz_path, stem0, stem1, opt.show_keypoints,
+                opt.fast_viz, opt.opencv_display, 'Matches')
+
             timer.update('viz_match')
 
         if do_viz_eval:
             # Visualize the evaluation results for the image pair.
             color = np.clip((epi_errs - 0) / (1e-3 - 0), 0, 1)
             color = error_colormap(1 - color)
-            e_t = 'FAIL' if np.isinf(err_t) else '{:.1f}°'.format(err_t)
-            e_R = 'FAIL' if np.isinf(err_R) else '{:.1f}°'.format(err_R)
+            deg, delta = ' deg', 'Delta '
+            if not opt.fast_viz:
+                deg, delta = '°', '$\\Delta$'
+            e_t = 'FAIL' if np.isinf(err_t) else '{:.1f}{}'.format(err_t, deg)
+            e_R = 'FAIL' if np.isinf(err_R) else '{:.1f}{}'.format(err_R, deg)
             text = [
                 'SuperGlue',
-                '$\\Delta$R: {}'.format(e_R), '$\\Delta$t: {}'.format(e_t),
+                '{}R: {}'.format(delta, e_R), '{}t: {}'.format(delta, e_t),
                 'inliers: {}/{}'.format(num_correct, (matches > -1).sum()),
             ]
             if rot0 != 0 or rot1 != 0:
                 text.append('Rotation: {}:{}'.format(rot0, rot1))
+
             make_matching_plot(
-                image0, image1, kpts0, kpts1, mkpts0, mkpts1, color,
-                text, viz_eval_path, stem0, stem1,
-                add_keypoints=opt.show_keypoints)
+                image0, image1, kpts0, kpts1, mkpts0,
+                mkpts1, color, text, viz_eval_path,
+                stem0, stem1, opt.show_keypoints,
+                opt.fast_viz, opt.opencv_display, 'Relative Pose')
+
             timer.update('viz_eval')
 
         timer.print('Finished pair {:5} of {:5}'.format(i, len(pairs)))

@@ -44,10 +44,10 @@
 # --------------------------------------------------------------------*/
 # %BANNER_END%
 
+from pathlib import Path
 import argparse
 import cv2
 import matplotlib.cm as cm
-from pathlib import Path
 import torch
 
 from models.matching import Matching
@@ -66,13 +66,13 @@ if __name__ == '__main__':
         help='ID of a USB webcam, URL of an IP camera, '
              'or path to an image directory or movie file')
     parser.add_argument(
-        '--img_glob', type=str, nargs='+', default=['*.png', '*.jpg', '*.jpeg'],
+        '--image_glob', type=str, nargs='+', default=['*.png', '*.jpg', '*.jpeg'],
         help='Glob if a directory of images is specified')
     parser.add_argument(
         '--skip', type=int, default=1,
         help='Images to skip if input is a movie or directory')
     parser.add_argument(
-        '--maxlen', type=int, default=1000000,
+        '--max_length', type=int, default=1000000,
         help='Maximum length if input is a movie or directory')
     parser.add_argument(
         '--resize', type=int, nargs='+', default=[640, 480],
@@ -81,23 +81,24 @@ if __name__ == '__main__':
              'dimension, if -1, do not resize')
 
     parser.add_argument(
+        '--superglue', choices={'indoor', 'outdoor'}, default='indoor',
+        help='SuperGlue weights')
+    parser.add_argument(
         '--max_keypoints', type=int, default=-1,
         help='Maximum number of keypoints detected by Superpoint'
              ' (\'-1\' keeps all keypoints)')
     parser.add_argument(
+        '--keypoint_threshold', type=float, default=0.005,
+        help='SuperPoint keypoint detector confidence threshold')
+    parser.add_argument(
         '--nms_radius', type=int, default=4,
-        help='SuperPoint Non Maximum Suppression (NMS) radius')
-    parser.add_argument(
-        '--keypoint_thresh', type=float, default=0.005,
-        help='SuperPoint detector confidence threshold')
-    parser.add_argument(
-        '--superglue', choices={'indoor', 'outdoor'}, default='indoor',
-        help='SuperGlue weights')
+        help='SuperPoint Non Maximum Suppression (NMS) radius'
+        ' (Must be positive)')
     parser.add_argument(
         '--sinkhorn_iterations', type=int, default=20,
         help='Number of Sinkhorn iterations performed by SuperGlue')
     parser.add_argument(
-        '--match_thresh', type=float, default=0.2,
+        '--match_threshold', type=float, default=0.2,
         help='SuperGlue match threshold')
 
     parser.add_argument(
@@ -138,20 +139,20 @@ if __name__ == '__main__':
     config = {
         'superpoint': {
             'nms_radius': opt.nms_radius,
-            'detection_threshold': opt.keypoint_thresh,
+            'keypoint_threshold': opt.keypoint_threshold,
             'max_keypoints': opt.max_keypoints
         },
         'superglue': {
             'weights': opt.superglue,
-            'num_sinkhorn_iterations': opt.sinkhorn_iterations,
-            'filter_threshold': opt.match_thresh,
+            'sinkhorn_iterations': opt.sinkhorn_iterations,
+            'match_threshold': opt.match_threshold,
         }
     }
     matching = Matching(config).eval().to(device)
     keys = ['keypoints', 'scores', 'descriptors']
 
     vs = VideoStreamer(opt.input, opt.resize, opt.skip,
-                       opt.img_glob, opt.maxlen)
+                       opt.image_glob, opt.max_length)
     frame, ret = vs.next_frame()
     assert ret, 'Error when reading the first frame (try different --input?)'
 
@@ -199,8 +200,8 @@ if __name__ == '__main__':
             'Matches: {}'.format(len(mkpts0))
         ]
         out = make_matching_plot_fast(
-            last_frame, frame, kpts0, kpts1, mkpts0, mkpts1, color, text,
-            add_keypoints=opt.show_keypoints)
+            last_frame, frame, kpts0, kpts1, mkpts0, mkpts1, color, text, path=None,
+            show_keypoints=opt.show_keypoints)
 
         if not opt.no_display:
             ds = opt.display_scale
@@ -208,6 +209,7 @@ if __name__ == '__main__':
             cv2.imshow('SuperGlue matches', out)
             key = chr(cv2.waitKey(1) & 0xFF)
             if key == 'q':
+                vs.cleanup()
                 print('Exiting (via q) demo_superglue.py')
                 break
             elif key == 'n':  # set the current frame as reference
@@ -217,16 +219,16 @@ if __name__ == '__main__':
                 last_image_id = (vs.i - 1)
             elif key in ['e', 'r']:  # increase/decrease the detection threshold
                 d = 0.001 * (-1 if key == 'e' else 1)
-                matching.superpoint.config['detection_threshold'] = min(max(
-                    0.001, matching.superpoint.config['detection_threshold']+d), 1)
+                matching.superpoint.config['keypoint_threshold'] = min(max(
+                    0.001, matching.superpoint.config['keypoint_threshold']+d), 1)
                 print('\nChanged the detection threshold to {:.3f}'.format(
-                    matching.superpoint.config['detection_threshold']))
+                    matching.superpoint.config['keypoint_threshold']))
             elif key in ['d', 'f']:  # increase/decrease the match threshold
                 d = 0.05 * (-1 if key == 'd' else 1)
-                matching.superglue.config['filter_threshold'] = min(max(
-                    0.05, matching.superglue.config['filter_threshold']+d), .95)
+                matching.superglue.config['match_threshold'] = min(max(
+                    0.05, matching.superglue.config['match_threshold']+d), .95)
                 print('\nChanged the match threshold to {:.2f}'.format(
-                    matching.superglue.config['filter_threshold']))
+                    matching.superglue.config['match_threshold']))
             elif key == 'k':
                 opt.show_keypoints = not opt.show_keypoints
 
@@ -240,3 +242,4 @@ if __name__ == '__main__':
             cv2.imwrite(out_file, out)
 
     cv2.destroyAllWindows()
+    vs.cleanup()

@@ -22,14 +22,15 @@ We provide two pre-trained weights files: an indoor model trained on ScanNet dat
 * PyTorch >= 1.1
 * OpenCV >= 3.4 (4.1.2.30 recommended for best GUI keyboard interaction, see this [note](#additional-notes))
 * Matplotlib >= 3.1
+* NumPy >= 1.18
 
-Simply run the following command: `pip3 install opencv-python torch matplotlib`
+Simply run the following command: `pip3 install numpy opencv-python torch matplotlib`
 
 ## Contents
 There are two main top-level scripts in this repo:
 
 1. `demo_superglue.py` : runs a live demo on a webcam, IP camera, image directory or movie file
-2. `match_pairs.py`: reads image pairs from files and dumps matches to disk (also runs evaluation if GT is provided)
+2. `match_pairs.py`: reads image pairs from files and dumps matches to disk (also runs evaluation if ground truth relative poses are provided)
 
 ## Live Matching Demo Script (`demo_superglue.py`)
 This demo runs SuperPoint + SuperGlue feature matching on an anchor image and live image. You can update the anchor image by pressing the `n` key. The demo can read image streams from a USB or IP camera, a directory containing images, or a video file. You can pass all of these inputs using the `--input` flag.
@@ -72,7 +73,7 @@ The matches are colored by their predicted confidence in a jet colormap (Red: mo
 
 ### Additional useful command line parameters
 * Use `--display_scale` to scale the output visualization image height and width (default: `1`).
-* Use `--img_glob` to change the image file extension (default: `*.png`, `*.jpg`, `*.jpeg`).
+* Use `--image_glob` to change the image file extension (default: `*.png`, `*.jpg`, `*.jpeg`).
 * Use `--skip` to skip intermediate frames (default: `1`).
 * Use `--show_keypoints` to visualize the detected keypoints (default: `False`).
 
@@ -86,7 +87,7 @@ This repo also contains a script `match_pairs.py` that runs the matching from a 
 * Save the keypoints, matches, and evaluation results for further processing
 * Collate evaluation results over many pairs and generate result tables
 
-### Matches Only Mode
+### Matches only mode
 
 The simplest usage of this script will process the image pairs listed in a given text file and dump the keypoints and matches to compressed numpy `npz` files. We provide the challenging ScanNet pairs from the main paper in `assets/example_indoor_pairs/`. Running the following will run SuperPoint + SuperGlue on each image pair, and dump the results to `dump_match_pairs/`:
 
@@ -116,7 +117,7 @@ The resulting `.npz` files can be read from Python as follows:
 
 For each keypoint in `keypoints0`, the `matches` array indicates the index of the matching keypoint in `keypoints1`, or `-1` if the keypoint is unmatched.
 
-### Visualization Mode
+### Visualization mode
 
 You can add the flag `--viz` to dump image outputs which visualize the matches:
 
@@ -132,9 +133,9 @@ The matches are colored by their predicted confidence in a jet colormap (Red: mo
 
 ### Evaluation mode
 
-You can also estimate the pose using RANSAC + Essential Matrix decomposition and evaluate it if the ground truth relative poses and intrinsics are provided in the input `.txt` files. Each `.txt` file contains three key groundtruth matrices: a 3x3 intrinsics matrix of image0: `K0`, a 3x3 intrinsics matrix of image1: `K1` , and a 4x4 matrix of the relative pose extrinsics `T_0to1`.
+You can also estimate the pose using RANSAC + Essential Matrix decomposition and evaluate it if the ground truth relative poses and intrinsics are provided in the input `.txt` files. Each `.txt` file contains three key ground truth matrices: a 3x3 intrinsics matrix of image0: `K0`, a 3x3 intrinsics matrix of image1: `K1` , and a 4x4 matrix of the relative pose extrinsics `T_0to1`.
 
-To run the evaluation on the sample set of images (by default reading `assets/scannet_sample_pairs.txt`), you can run:
+To run the evaluation on the sample set of images (by default reading `assets/scannet_sample_pairs_with_gt.txt`), you can run:
 
 ```sh
 ./match_pairs.py --eval
@@ -175,7 +176,7 @@ The top left corner of the image shows the pose error and number of inliers, whi
 
 <details>
   <summary>[Click to expand]</summary>
-  
+
 In this repo, we also provide a few challenging Phototourism pairs, so that you can re-create some of the figures from the paper. Run this script to run matching and visualization (no ground truth is provided, see this [note](#reproducing-outdoor-evaluation-final-table)) on the provided pairs:
 
 ```sh
@@ -189,11 +190,11 @@ You should now image pairs such as these in `dump_match_pairs_outdoor/` (or some
 
 </details>
 
-### Recommended Settings for indoor / outdoor
+### Recommended settings for indoor / outdoor
 
 <details>
   <summary>[Click to expand]</summary>
-  
+
 For **indoor** images, we recommend the following settings (these are the defaults):
 
 ```sh
@@ -213,26 +214,25 @@ You can provide your own list of pairs `--pairs_list` for images contained in `-
 
 <details>
   <summary>[Click to expand]</summary>
-  
-We provide the list of ScanNet test pairs in `assets/scannet_test_pairs.txt` and Phototourism test pairs `assets/phototourism_test_pairs.txt` used to evaluate the matching from the paper. Each line corresponds to one pair and is structured as follows:
+
+We provide the list of ScanNet test pairs in `assets/scannet_test_pairs_with_gt.txt` (with ground truth) and Phototourism test pairs `assets/phototourism_test_pairs.txt` (without ground truth) used to evaluate the matching from the paper. Each line corresponds to one pair and is structured as follows:
 
 ```
-path_image_A path_image_B overlap exif_rotationA exif_rotationB [KA_0 ... KA_8] [KB_0 ... KB_8] [T_AB_0 ... T_AB_15]
+path_image_A path_image_B exif_rotationA exif_rotationB [KA_0 ... KA_8] [KB_0 ... KB_8] [T_AB_0 ... T_AB_15]
 ```
 
-
-The `path_image_A` and `path_image_B` entries are paths to image A and B, respectively. The `overlap` is a score that measures the image similarity/ viewpoint overlap. Higher means more overlap. If the overlap is unknown you can just provide 0., the overlap is not actually used during evalution. The `exif_rotation` is an integer in the range [0, 3] that comes from the original EXIF metadata associated with the image, where, 0: no rotation, 1: 90 degree clockwise, 2: 180 degree clockwise, 3: 270 degree clockwise. If the EXIF data is not known, you can just provide a zero here and no rotation will be performed. `KA` and `KB` are the flattened `3x3` matrices of image A and image B intrinsics. `T_AB` is a flattened `4x4` matrix of the extrinsics between the pair.
+The `path_image_A` and `path_image_B` entries are paths to image A and B, respectively. The `exif_rotation` is an integer in the range [0, 3] that comes from the original EXIF metadata associated with the image, where, 0: no rotation, 1: 90 degree clockwise, 2: 180 degree clockwise, 3: 270 degree clockwise. If the EXIF data is not known, you can just provide a zero here and no rotation will be performed. `KA` and `KB` are the flattened `3x3` matrices of image A and image B intrinsics. `T_AB` is a flattened `4x4` matrix of the extrinsics between the pair.
 </details>
 
-### Reproducing Indoor Evaluation Final Table
+### Reproducing indoor evaluation final table
 
 <details>
   <summary>[Click to expand]</summary>
-  
-In order to reproduce similar tables to what was in the paper, you will need to obtain the raw test set images (we do not include them in this repo). We list the scenes and images in `assets/scannet_test_images.txt`. We provide the groundtruth in our format in the file `assets/scannet_test_pairs.txt` for convenience. If you put the raw images in the directory `assets/scannet_test_images/`, you can reproduce the full results with:
+
+In order to reproduce similar tables to what was in the paper, you will need to obtain the raw test set images (we do not include them in this repo). We list the scenes and images in `assets/scannet_test_images.txt`. We provide the groundtruth in our format in the file `assets/scannet_test_pairs_with_gt.txt` for convenience. If you put the raw images in the directory `assets/scannet_test_images/`, you can reproduce the full results with:
 
 ```sh
-./match_pairs.py --eval --pairs_list assets/scannet_test_pairs.txt --data_dir assets/scannet_test_images/ --results_dir dump_scannet_test_results
+./match_pairs.py --eval --pairs_list assets/scannet_test_pairs_with_gt.txt --data_dir assets/scannet_test_images/ --results_dir dump_scannet_test_results
 ```
 
 You should get the following table for ScanNet (or something very close to it, see this [note](#a-note-on-reproducibility)):
@@ -245,12 +245,12 @@ AUC@5    AUC@10  AUC@20  Prec    MScore
 
 </details>
 
-### Reproducing Outdoor Evaluation Final Table
+### Reproducing outdoor evaluation final table
 
 <details>
   <summary>[Click to expand]</summary>
 
-The Phototourism results shown in the paper were produced using similar data as the test set from the [Image Matching Workshop](https://vision.uvic.ca/image-matching-challenge/), which does not contain publically available ground truth data for the test set. We list the pairs and overlaps we used in `assets/phototourism_test_pairs_no_groundtruth.txt`. To reproduce similar numbers on this test set, please use the image matching workshop benchmark. While the challenge is still live, we cannot share the test set publically since we want to help maintain the integrity of the challenge.
+The Phototourism results shown in the paper were produced using similar data as the test set from the [Image Matching Workshop](https://vision.uvic.ca/image-matching-challenge/), which does not contain publically available ground truth data for the test set. We list the pairs we used in `assets/phototourism_test_pairs.txt`. To reproduce similar numbers on this test set, please use the image matching workshop benchmark. While the challenge is still live, we cannot share the test set publically since we want to help maintain the integrity of the challenge.
 
 </details>
 
@@ -258,7 +258,7 @@ The Phototourism results shown in the paper were produced using similar data as 
 
 <details>
   <summary>[Click to expand]</summary>
-  
+
 For training and validation of the outdoor model, we used scenes from the [MegaDepth dataset](http://www.cs.cornell.edu/projects/megadepth/). We provide the list of scenes used to train the outdoor model in the `assets/` directory:
 
 * Training set: `assets/megadepth_train_scenes.txt`
@@ -270,9 +270,37 @@ For training and validation of the outdoor model, we used scenes from the [MegaD
 
 <details>
   <summary>[Click to expand]</summary>
-  
+
 After simplifying the model code and evaluation code and preparing it for release, we made some improvements and tweaks that result in slightly different numbers than what was reported in the paper. The numbers and figures reported in the README were done using Ubuntu 16.04, OpenCV 3.4.5, and PyTorch 1.1.0. Even with matching the library versions, we observed some slight differences across Mac and Ubuntu, which we believe are due to differences in OpenCV's image resize function implementation and randomization of RANSAC.
 </details>
+
+### Creating high-quality PDF visualizations and --fast_viz
+
+<details>
+  <summary>[Click to expand]</summary>
+
+When generating output images with `match_pairs.py`, the default `--viz` flag uses a Matplotlib renderer which allows for the generation of camera-ready PDF visualizations if you additionally use `--viz_extension pdf` instead of the default png extension.
+
+```
+./match_pairs.py --viz --viz_extension pdf
+```
+
+Alternatively, you might want to save visualization images but have
+the generation be much faster.  You can use the `--fast_viz` flag to
+use an OpenCV-based image renderer as follows:
+
+```
+./match_pairs.py --viz --fast_viz
+```
+
+If you would also like an OpenCV display window to preview the results (you must use non-pdf output and use fast_fiz), simply run:
+
+```
+./match_pairs.py --viz --fast_viz --opencv_display
+```
+
+</details>
+
 
 ## BibTeX Citation
 If you use any ideas from the paper or code from this repo, please consider citing:
