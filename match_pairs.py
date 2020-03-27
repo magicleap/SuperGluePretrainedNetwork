@@ -68,12 +68,27 @@ if __name__ == '__main__':
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     parser.add_argument(
-        '--viz', action='store_true',
-        help='Visualize the matches and dump the plots')
+        '--input_pairs', type=str, default='assets/scannet_sample_pairs_with_gt.txt',
+        help='Path to the list of image pairs')
     parser.add_argument(
-        '--eval', action='store_true',
-        help='Perform the evaluation'
-             ' (requires ground truth pose and intrinsics)')
+        '--input_dir', type=str, default='assets/scannet_sample_images/',
+        help='Path to the directory that contains the images')
+    parser.add_argument(
+        '--output_dir', type=str, default='dump_match_pairs/',
+        help='Path to the directory in which the .npz results and optionally,'
+             'the visualization images are written')
+
+    parser.add_argument(
+        '--max_length', type=int, default=-1,
+        help='Maximum number of pairs to evaluate')
+    parser.add_argument(
+        '--resize', type=int, nargs='+', default=[640, 480],
+        help='Resize the input image before running inference. If two numbers, '
+             'resize to the exact dimensions, if one number, resize the max '
+             'dimension, if -1, do not resize')
+    parser.add_argument(
+        '--resize_float', action='store_true',
+        help='Resize the image after casting uint8 to float')
 
     parser.add_argument(
         '--superglue', choices={'indoor', 'outdoor'}, default='indoor',
@@ -97,14 +112,15 @@ if __name__ == '__main__':
         help='SuperGlue match threshold')
 
     parser.add_argument(
-        '--resize', type=int, nargs='+', default=[640, 480],
-        help='Resize the input image before running inference. If two numbers, '
-             'resize to the exact dimensions, if one number, resize the max '
-             'dimension, if -1, do not resize')
+        '--viz', action='store_true',
+        help='Visualize the matches and dump the plots')
     parser.add_argument(
-        '--resize_float', action='store_true',
-        help='Resize the image after casting uint8 to float')
-
+        '--eval', action='store_true',
+        help='Perform the evaluation'
+             ' (requires ground truth pose and intrinsics)')
+    parser.add_argument(
+        '--fast_viz', action='store_true',
+        help='Use faster image visualization with OpenCV instead of Matplotlib')
     parser.add_argument(
         '--cache', action='store_true',
         help='Skip the pair if output .npz files are already found')
@@ -112,32 +128,17 @@ if __name__ == '__main__':
         '--show_keypoints', action='store_true',
         help='Plot the keypoints in addition to the matches')
     parser.add_argument(
-        '--fast_viz', action='store_true',
-        help='Use faster image visualization based on OpenCV instead of Matplotlib')
-    parser.add_argument(
         '--viz_extension', type=str, default='png', choices=['png', 'pdf'],
         help='Visualization file extension. Use pdf for highest-quality.')
-
     parser.add_argument(
         '--opencv_display', action='store_true',
         help='Visualize via OpenCV before saving output images')
     parser.add_argument(
-        '--pairs_list', type=str, default='assets/scannet_sample_pairs_with_gt.txt',
-        help='Path to the list of image pairs')
-    parser.add_argument(
         '--shuffle', action='store_true',
         help='Shuffle ordering of pairs before processing')
     parser.add_argument(
-        '--max_length', type=int, default=-1,
-        help='Maximum number of pairs to evaluate')
-
-    parser.add_argument(
-        '--data_dir', type=str, default='assets/scannet_sample_images/',
-        help='Path to the directory that contains the images')
-    parser.add_argument(
-        '--results_dir', type=str, default='dump_match_pairs/',
-        help='Path to the directory in which the .npz results and optional,'
-             'visualizations are written')
+        '--force_cpu', action='store_true',
+        help='Force pytorch to run in CPU mode.')
 
     opt = parser.parse_args()
     print(opt)
@@ -159,7 +160,7 @@ if __name__ == '__main__':
     else:
         raise ValueError('Cannot specify more than two integers for --resize')
 
-    with open(opt.pairs_list, 'r') as f:
+    with open(opt.input_pairs, 'r') as f:
         pairs = [l.split() for l in f.readlines()]
 
     if opt.max_length > -1:
@@ -172,10 +173,10 @@ if __name__ == '__main__':
         if not all([len(p) == 38 for p in pairs]):
             raise ValueError(
                 'All pairs should have ground truth info for evaluation.'
-                'File \"{}\" needs 38 valid entries per row'.format(opt.pairs_list))
+                'File \"{}\" needs 38 valid entries per row'.format(opt.input_pairs))
 
     # Load the SuperPoint and SuperGlue models.
-    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    device = 'cuda' if torch.cuda.is_available() and not opt.force_cpu else 'cpu'
     print('Running inference on device \"{}\"'.format(device))
     config = {
         'superpoint': {
@@ -192,26 +193,26 @@ if __name__ == '__main__':
     matching = Matching(config).eval().to(device)
 
     # Create the output directories if they do not exist already.
-    data_dir = Path(opt.data_dir)
-    print('Looking for data in directory \"{}\"'.format(data_dir))
-    results_dir = Path(opt.results_dir)
-    results_dir.mkdir(exist_ok=True, parents=True)
-    print('Will write matches to directory \"{}\"'.format(results_dir))
+    input_dir = Path(opt.input_dir)
+    print('Looking for data in directory \"{}\"'.format(input_dir))
+    output_dir = Path(opt.output_dir)
+    output_dir.mkdir(exist_ok=True, parents=True)
+    print('Will write matches to directory \"{}\"'.format(output_dir))
     if opt.eval:
         print('Will write evaluation results',
-              'to directory \"{}\"'.format(results_dir))
+              'to directory \"{}\"'.format(output_dir))
     if opt.viz:
         print('Will write visualization images to',
-              'directory \"{}\"'.format(results_dir))
+              'directory \"{}\"'.format(output_dir))
 
     timer = AverageTimer(newline=True)
     for i, pair in enumerate(pairs):
         name0, name1 = pair[:2]
         stem0, stem1 = Path(name0).stem, Path(name1).stem
-        matches_path = results_dir / '{}_{}_matches.npz'.format(stem0, stem1)
-        eval_path = results_dir / '{}_{}_evaluation.npz'.format(stem0, stem1)
-        viz_path = results_dir / '{}_{}_matches.{}'.format(stem0, stem1, opt.viz_extension)
-        viz_eval_path = results_dir / \
+        matches_path = output_dir / '{}_{}_matches.npz'.format(stem0, stem1)
+        eval_path = output_dir / '{}_{}_evaluation.npz'.format(stem0, stem1)
+        viz_path = output_dir / '{}_{}_matches.{}'.format(stem0, stem1, opt.viz_extension)
+        viz_eval_path = output_dir / \
             '{}_{}_evaluation.{}'.format(stem0, stem1, opt.viz_extension)
 
         # Handle --cache logic.
@@ -259,12 +260,12 @@ if __name__ == '__main__':
 
         # Load the image pair.
         image0, inp0, scales0 = read_image(
-            data_dir / name0, device, opt.resize, rot0, opt.resize_float)
+            input_dir / name0, device, opt.resize, rot0, opt.resize_float)
         image1, inp1, scales1 = read_image(
-            data_dir / name1, device, opt.resize, rot1, opt.resize_float)
+            input_dir / name1, device, opt.resize, rot1, opt.resize_float)
         if image0 is None or image1 is None:
             print('Problem reading image pair: {} {}'.format(
-                data_dir/name0, data_dir/name1))
+                input_dir/name0, input_dir/name1))
             exit(1)
         timer.update('load_image')
 
@@ -346,10 +347,19 @@ if __name__ == '__main__':
             if rot0 != 0 or rot1 != 0:
                 text.append('Rotation: {}:{}'.format(rot0, rot1))
 
+            # Display extra parameter info.
+            k_thresh = matching.superpoint.config['keypoint_threshold']
+            m_thresh = matching.superglue.config['match_threshold']
+            small_text = [
+                'Keypoint Threshold: {:.4f}'.format(k_thresh),
+                'Match Threshold: {:.2f}'.format(m_thresh),
+                'Image Pair: {}:{}'.format(stem0, stem1),
+            ]
+
             make_matching_plot(
                 image0, image1, kpts0, kpts1, mkpts0, mkpts1, color,
-                text, viz_path, stem0, stem1, opt.show_keypoints,
-                opt.fast_viz, opt.opencv_display, 'Matches')
+                text, viz_path, opt.show_keypoints,
+                opt.fast_viz, opt.opencv_display, 'Matches', small_text)
 
             timer.update('viz_match')
 
@@ -370,11 +380,20 @@ if __name__ == '__main__':
             if rot0 != 0 or rot1 != 0:
                 text.append('Rotation: {}:{}'.format(rot0, rot1))
 
+            # Display extra parameter info (only works with --fast_viz).
+            k_thresh = matching.superpoint.config['keypoint_threshold']
+            m_thresh = matching.superglue.config['match_threshold']
+            small_text = [
+                'Keypoint Threshold: {:.4f}'.format(k_thresh),
+                'Match Threshold: {:.2f}'.format(m_thresh),
+                'Image Pair: {}:{}'.format(stem0, stem1),
+            ]
+
             make_matching_plot(
                 image0, image1, kpts0, kpts1, mkpts0,
                 mkpts1, color, text, viz_eval_path,
-                stem0, stem1, opt.show_keypoints,
-                opt.fast_viz, opt.opencv_display, 'Relative Pose')
+                opt.show_keypoints, opt.fast_viz,
+                opt.opencv_display, 'Relative Pose', small_text)
 
             timer.update('viz_eval')
 
@@ -388,7 +407,7 @@ if __name__ == '__main__':
         for pair in pairs:
             name0, name1 = pair[:2]
             stem0, stem1 = Path(name0).stem, Path(name1).stem
-            eval_path = results_dir / \
+            eval_path = output_dir / \
                 '{}_{}_evaluation.npz'.format(stem0, stem1)
             results = np.load(eval_path)
             pose_error = np.maximum(results['error_t'], results['error_R'])

@@ -45,8 +45,8 @@ Run the demo on the default USB webcam (ID #0), running on a CUDA GPU if one is 
 
 Keyboard control:
 
-* `n`: select the current frame as the reference
-* `e`/`r`: increase/decrease the detector confidence threshold
+* `n`: select the current frame as the anchor
+* `e`/`r`: increase/decrease the keypoint confidence threshold
 * `d`/`f`: increase/decrease the match filtering threshold
 * `k`: toggle the visualization of keypoints
 * `q`: quit
@@ -57,12 +57,20 @@ Run the demo on 320x240 images running on the CPU:
 ./demo_superglue.py --resize 320 240 --force_cpu
 ```
 
+The `--resize` flag can be used to resize the input image in three ways:
+
+1. `--resize` `width` `height` : will resize to exact `width` x `height` dimensions
+2. `--resize` `max_dimension` : will resize largest input image dimension to `max_dimension`
+3. `--resize` `-1` : will not resize (i.e. use original image dimensions)
+
+The default will resize images to `640x480`.
+
 ### Run the demo on a directory of images
 
-The `--input` flag also accepts paths to directories. We provide a directory of sample images from a sequence. To run the demo on the directory of images in `freiburg_sequence/` on a headless server (will not display to the screen) and write to `dump_demo_sequence/`:
+The `--input` flag also accepts a path to a directory. We provide a directory of sample images from a sequence. To run the demo on the directory of images in `freiburg_sequence/` on a headless server (will not display to the screen) and write the output visualization images to `dump_demo_sequence/`:
 
 ```sh
-./demo_superglue.py --input assets/freiburg_sequence/ --resize 320 240 --no_display --write --write_dir dump_demo_sequence
+./demo_superglue.py --input assets/freiburg_sequence/ --output_dir dump_demo_sequence --resize 320 240 --no_display
 ```
 
 You should see this output on the sample Freiburg-TUM RGBD sequence:
@@ -72,9 +80,9 @@ You should see this output on the sample Freiburg-TUM RGBD sequence:
 The matches are colored by their predicted confidence in a jet colormap (Red: more confident, Blue: less confident).
 
 ### Additional useful command line parameters
-* Use `--display_scale` to scale the output visualization image height and width (default: `1`).
 * Use `--image_glob` to change the image file extension (default: `*.png`, `*.jpg`, `*.jpeg`).
 * Use `--skip` to skip intermediate frames (default: `1`).
+* Use `--max_length` to cap the total number of frames processed (default: `1000000`).
 * Use `--show_keypoints` to visualize the detected keypoints (default: `False`).
 
 ## Run Matching+Evaluation (`match_pairs.py`)
@@ -180,13 +188,12 @@ The top left corner of the image shows the pose error and number of inliers, whi
 In this repo, we also provide a few challenging Phototourism pairs, so that you can re-create some of the figures from the paper. Run this script to run matching and visualization (no ground truth is provided, see this [note](#reproducing-outdoor-evaluation-final-table)) on the provided pairs:
 
 ```sh
-./match_pairs.py --resize 1600 --superglue outdoor --max_keypoints 2048 --nms_radius 3  --resize_float --data_dir assets/phototourism_sample_images/ --pairs_list assets/phototourism_sample_pairs.txt --results_dir dump_match_pairs_outdoor --viz
+./match_pairs.py --resize 1600 --superglue outdoor --max_keypoints 2048 --nms_radius 3  --resize_float --input_dir assets/phototourism_sample_images/ --input_pairs assets/phototourism_sample_pairs.txt --output_dir dump_match_pairs_outdoor --viz
 ```
 
 You should now image pairs such as these in `dump_match_pairs_outdoor/` (or something very close to it, see this [note](#a-note-on-reproducibility)):
 
 <img src="assets/outdoor_matches.png" width="560">
-
 
 </details>
 
@@ -207,7 +214,7 @@ For **outdoor** images, we recommend the following settings:
 ./match_pairs.py --resize 1600 --superglue outdoor --max_keypoints 2048 --nms_radius 3 --resize_float
 ```
 
-You can provide your own list of pairs `--pairs_list` for images contained in `--data_dir`. Images can be resized before network inference with `--resize`. If you are re-running the same evaluation many times, you can use the `--cache` flag to reuse old computation.
+You can provide your own list of pairs `--input_pairs` for images contained in `--input_dir`. Images can be resized before network inference with `--resize`. If you are re-running the same evaluation many times, you can use the `--cache` flag to reuse old computation.
 </details>
 
 ### Test set pair file format explained
@@ -224,15 +231,20 @@ path_image_A path_image_B exif_rotationA exif_rotationB [KA_0 ... KA_8] [KB_0 ..
 The `path_image_A` and `path_image_B` entries are paths to image A and B, respectively. The `exif_rotation` is an integer in the range [0, 3] that comes from the original EXIF metadata associated with the image, where, 0: no rotation, 1: 90 degree clockwise, 2: 180 degree clockwise, 3: 270 degree clockwise. If the EXIF data is not known, you can just provide a zero here and no rotation will be performed. `KA` and `KB` are the flattened `3x3` matrices of image A and image B intrinsics. `T_AB` is a flattened `4x4` matrix of the extrinsics between the pair.
 </details>
 
-### Reproducing indoor evaluation final table
+### Reproducing the indoor evaluation on ScanNet
 
 <details>
   <summary>[Click to expand]</summary>
 
-In order to reproduce similar tables to what was in the paper, you will need to obtain the raw test set images (we do not include them in this repo). We list the scenes and images in `assets/scannet_test_images.txt`. We provide the groundtruth in our format in the file `assets/scannet_test_pairs_with_gt.txt` for convenience. If you put the raw images in the directory `assets/scannet_test_images/`, you can reproduce the full results with:
+We provide the groundtruth for ScanNet in our format in the file `assets/scannet_test_pairs_with_gt.txt` for convenience. In order to reproduce similar tables to what was in the paper, you will need to download the dataset (we do not provide the raw test images). To download the ScanNet dataset, do the following:
+
+1. Head to the [ScanNet](https://github.com/ScanNet/ScanNet) github repo to download the ScanNet test set (100 scenes).
+2. You will need to extract the raw sensor data from the 100 `.sens` files in each scene in the test set using the [SensReader](https://github.com/ScanNet/ScanNet/tree/master/SensReader) tool.
+
+Once the ScanNet dataset is downloaded in `~/data/scannet`, you can run the following:
 
 ```sh
-./match_pairs.py --eval --pairs_list assets/scannet_test_pairs_with_gt.txt --data_dir assets/scannet_test_images/ --results_dir dump_scannet_test_results
+./match_pairs.py --input_dir ~/data/scannet --input_pairs assets/scannet_test_pairs_with_gt.txt --output_dir dump_scannet_test_results --eval
 ```
 
 You should get the following table for ScanNet (or something very close to it, see this [note](#a-note-on-reproducibility)):
@@ -245,7 +257,38 @@ AUC@5    AUC@10  AUC@20  Prec    MScore
 
 </details>
 
-### Reproducing outdoor evaluation final table
+### Reproducing the outdoor evaluation on YFCC
+
+<details>
+  <summary>[Click to expand]</summary>
+
+We provide the groundtruth for YFCC in our format in the file `assets/yfcc_test_pairs_with_gt.txt` for convenience. In order to reproduce similar tables to what was in the paper, you will need to download the dataset (we do not provide the raw test images). To download the YFCC dataset, you can use the [OANet](https://github.com/zjhthu/OANet) repo:
+
+```sh
+git clone https://github.com/zjhthu/OANet
+cd OANet
+bash download_data.sh raw_data raw_data_yfcc.tar.gz 0 8
+tar -xvf raw_data_yfcc.tar.gz
+mv raw_data/yfcc100m ~/data
+```
+
+Once the YFCC dataset is downloaded in `~/data/yfcc100m`, you can run the following:
+
+```sh
+./match_pairs.py --input_dir ~/data/yfcc100m --input_pairs assets/yfcc_test_pairs_with_gt.txt --output_dir dump_yfcc_test_results --eval --resize 1600 --superglue outdoor --max_keypoints 2048 --nms_radius 3 --resize_float
+```
+
+You should get the following table for YFCC (or something very close to it, see this [note](#a-note-on-reproducibility)):
+
+```txt
+Evaluation Results (mean over 4000 pairs):
+AUC@5    AUC@10  AUC@20  Prec    MScore
+39.02    59.51   75.72   98.72   23.61  
+```
+
+</details>
+
+### Reproducing outdoor evaluation on Phototourism
 
 <details>
   <summary>[Click to expand]</summary>
@@ -254,7 +297,18 @@ The Phototourism results shown in the paper were produced using similar data as 
 
 </details>
 
-### Outdoor training / validation scene split
+### Correcting EXIF rotation data in YFCC and Phototourism
+
+<details>
+  <summary>[Click to expand]</summary>
+
+In this repo, we provide manually corrected the EXIF rotation data for the outdoor evaluations on YFCC and Phototourism. For the YFCC dataset we found 7 images with incorrect EXIF rotation flags, resulting in 148 pairs out of 4000 being corrected. For Phototourism, we found 36 images with incorrect EXIF rotation flags, resulting in 212 out of 2200 pairs being corrected.
+
+The SuperGlue paper reports the results of SuperGlue **without** the corrected rotations, while the numbers in this README are reported **with** the corrected rotations. We found that our final conclusions from the evaluation still hold with or without the corrected rotations. For backwards compatability, we included the original, uncorrected EXIF rotation data in `assets/phototourism_test_pairs_original.txt` and `assets/yfcc_test_pairs_with_gt_original.txt` respectively.
+
+</details>
+
+### Outdoor training / validation scene splits of MegaDepth
 
 <details>
   <summary>[Click to expand]</summary>
@@ -274,7 +328,7 @@ For training and validation of the outdoor model, we used scenes from the [MegaD
 After simplifying the model code and evaluation code and preparing it for release, we made some improvements and tweaks that result in slightly different numbers than what was reported in the paper. The numbers and figures reported in the README were done using Ubuntu 16.04, OpenCV 3.4.5, and PyTorch 1.1.0. Even with matching the library versions, we observed some slight differences across Mac and Ubuntu, which we believe are due to differences in OpenCV's image resize function implementation and randomization of RANSAC.
 </details>
 
-### Creating high-quality PDF visualizations and --fast_viz
+### Creating high-quality PDF visualizations and faster visualization with --fast_viz
 
 <details>
   <summary>[Click to expand]</summary>
@@ -285,9 +339,7 @@ When generating output images with `match_pairs.py`, the default `--viz` flag us
 ./match_pairs.py --viz --viz_extension pdf
 ```
 
-Alternatively, you might want to save visualization images but have
-the generation be much faster.  You can use the `--fast_viz` flag to
-use an OpenCV-based image renderer as follows:
+Alternatively, you might want to save visualization images but have the generation be much faster.  You can use the `--fast_viz` flag to use an OpenCV-based image renderer as follows:
 
 ```
 ./match_pairs.py --viz --fast_viz
@@ -322,6 +374,7 @@ If you use any ideas from the paper or code from this repo, please consider citi
 * For the demo, we found that the keyboard interaction works well with OpenCV 4.1.2.30, older versions were less responsive and the newest version had a [OpenCV bug on Mac](https://stackoverflow.com/questions/60032540/opencv-cv2-imshow-is-not-working-because-of-the-qt)
 * We generally do not recommend to run SuperPoint+SuperGlue below 160x120 resolution (QQVGA) and above 2000x1500
 * We do not intend to release the SuperGlue training code.
+* We do not intend to release the SIFT-based SuperGlue models.
 
 ## Legal Disclaimer
 Magic Leap is proud to provide its latest samples, toolkits, and research projects on Github to foster development and gather feedback from the spatial computing community. Use of the resources within this repo is subject to (a) the license(s) included herein, or (b) if no license is included, Magic Leap's [Developer Agreement](https://id.magicleap.com/terms/developer), which is available on our [Developer Portal](https://developer.magicleap.com/).

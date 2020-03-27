@@ -304,7 +304,7 @@ def estimate_pose(kpts0, kpts1, K0, K1, thresh, conf=0.99999):
     best_num_inliers = 0
     ret = None
     for _E in np.split(E, len(E) / 3):
-        n, R, t, mask_new = cv2.recoverPose(
+        n, R, t, _ = cv2.recoverPose(
             _E, kpts0, kpts1, np.eye(3), 1e9, mask=mask)
         if n > best_num_inliers:
             best_num_inliers = n
@@ -450,13 +450,14 @@ def plot_matches(kpts0, kpts1, color, lw=1.5, ps=4):
 
 
 def make_matching_plot(image0, image1, kpts0, kpts1, mkpts0, mkpts1,
-                       color, text, path, name0, name1, show_keypoints=False,
-                       fast_viz=False, opencv_display=False, opencv_title='matches'):
+                       color, text, path, show_keypoints=False,
+                       fast_viz=False, opencv_display=False,
+                       opencv_title='matches', small_text=[]):
 
     if fast_viz:
         make_matching_plot_fast(image0, image1, kpts0, kpts1, mkpts0, mkpts1,
                                 color, text, path, show_keypoints, 10,
-                                opencv_display, opencv_title)
+                                opencv_display, opencv_title, small_text)
         return
 
     plot_image_pair([image0, image1])
@@ -473,12 +474,7 @@ def make_matching_plot(image0, image1, kpts0, kpts1, mkpts0, mkpts1,
 
     txt_color = 'k' if image0[-100:, :150].mean() > 200 else 'w'
     fig.text(
-        0.01, 0.01, name0, transform=fig.axes[0].transAxes,
-        fontsize=5, va='bottom', ha='left', color=txt_color)
-
-    txt_color = 'k' if image1[-100:, :150].mean() > 200 else 'w'
-    fig.text(
-        0.01, 0.01, name1, transform=fig.axes[1].transAxes,
+        0.01, 0.01, '\n'.join(small_text), transform=fig.axes[0].transAxes,
         fontsize=5, va='bottom', ha='left', color=txt_color)
 
     plt.savefig(str(path), bbox_inches='tight', pad_inches=0)
@@ -488,7 +484,8 @@ def make_matching_plot(image0, image1, kpts0, kpts1, mkpts0, mkpts1,
 def make_matching_plot_fast(image0, image1, kpts0, kpts1, mkpts0,
                             mkpts1, color, text, path=None,
                             show_keypoints=False, margin=10,
-                            opencv_display=False, opencv_title=''):
+                            opencv_display=False, opencv_title='',
+                            small_text=[]):
     H0, W0 = image0.shape
     H1, W1 = image1.shape
     H, W = max(H0, H1), W0 + W1 + margin
@@ -522,14 +519,26 @@ def make_matching_plot_fast(image0, image1, kpts0, kpts1, mkpts0,
         cv2.circle(out, (x1 + margin + W0, y1), 2, c, -1,
                    lineType=cv2.LINE_AA)
 
-    Ht = int(H * 30 / 480)  # text height
+    # Scale factor for consistent visualization across scales.
+    sc = min(H / 640., 2.0)
+
+    # Big text.
+    Ht = int(30 * sc)  # text height
     txt_color_fg = (255, 255, 255)
     txt_color_bg = (0, 0, 0)
     for i, t in enumerate(text):
-        cv2.putText(out, t, (10, Ht*(i+1)), cv2.FONT_HERSHEY_DUPLEX,
-                    H*1.0/480, txt_color_bg, 2, cv2.LINE_AA)
-        cv2.putText(out, t, (10, Ht*(i+1)), cv2.FONT_HERSHEY_DUPLEX,
-                    H*1.0/480, txt_color_fg, 1, cv2.LINE_AA)
+        cv2.putText(out, t, (int(8*sc), Ht*(i+1)), cv2.FONT_HERSHEY_DUPLEX,
+                    1.0*sc, txt_color_bg, 2, cv2.LINE_AA)
+        cv2.putText(out, t, (int(8*sc), Ht*(i+1)), cv2.FONT_HERSHEY_DUPLEX,
+                    1.0*sc, txt_color_fg, 1, cv2.LINE_AA)
+
+    # Small text.
+    Ht = int(18 * sc)  # text height
+    for i, t in enumerate(reversed(small_text)):
+        cv2.putText(out, t, (int(8*sc), int(H-Ht*(i+.6))), cv2.FONT_HERSHEY_DUPLEX,
+                    0.5*sc, txt_color_bg, 2, cv2.LINE_AA)
+        cv2.putText(out, t, (int(8*sc), int(H-Ht*(i+.6))), cv2.FONT_HERSHEY_DUPLEX,
+                    0.5*sc, txt_color_fg, 1, cv2.LINE_AA)
 
     if path is not None:
         cv2.imwrite(str(path), out)
