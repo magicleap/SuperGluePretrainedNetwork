@@ -103,8 +103,7 @@ class MultiHeadedAttention(nn.Module):
         batch_dim = query.size(0)
         query, key, value = [l(x).view(batch_dim, self.dim, self.num_heads, -1)
                              for l, x in zip(self.proj, (query, key, value))]
-        x, prob = attention(query, key, value)
-        self.prob.append(prob)
+        x, _ = attention(query, key, value)
         return self.merge(x.contiguous().view(batch_dim, self.dim*self.num_heads, -1))
 
 
@@ -130,7 +129,6 @@ class AttentionalGNN(nn.Module):
 
     def forward(self, desc0, desc1):
         for layer, name in zip(self.layers, self.names):
-            layer.attn.prob = []
             if name == 'cross':
                 src0, src1 = desc1, desc0
             else:  # if name == 'self':
