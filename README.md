@@ -7,7 +7,9 @@
 ## Introduction
 SuperGlue is a CVPR 2020 research project done at Magic Leap. The SuperGlue network is a Graph Neural Network combined with an Optimal Matching layer that is trained to perform matching on two sets of sparse image features. This repo includes PyTorch code and pretrained weights for running the SuperGlue matching network on top of [SuperPoint](https://arxiv.org/abs/1712.07629) keypoints and descriptors. Given a pair of images, you can use this repo to extract matching features across the image pair.
 
-<img src="assets/teaser.png" width="400">
+<p align="center">
+  <img src="assets/teaser.png" width="500">
+</p>
 
 SuperGlue operates as a "middle-end," performing context aggregation, matching, and filtering in a single end-to-end architecture. For more details, please see:
 
@@ -15,10 +17,14 @@ SuperGlue operates as a "middle-end," performing context aggregation, matching, 
 
 * Authors: *Paul-Edouard Sarlin, Daniel DeTone, Tomasz Malisiewicz, Andrew Rabinovich*
 
+* Website: [psarlin.com/superglue](https://psarlin.com/superglue) for videos, slides, recent updates, and more visualizations.
+
+* `hloc`: a new toolbox for visual localization and SfM with SuperGlue, available at [cvg/Hierarchical-Localization](https://github.com/cvg/Hierarchical-Localization/). Winner of 3 CVPR 2020 competitions on localization and image matching!
+
 We provide two pre-trained weights files: an indoor model trained on ScanNet data, and an outdoor model trained on MegaDepth data. Both models are inside the [weights directory](./models/weights). By default, the demo will run the **indoor** model.
 
 ## Dependencies
-* Python 3
+* Python 3 >= 3.5
 * PyTorch >= 1.1
 * OpenCV >= 3.4 (4.1.2.30 recommended for best GUI keyboard interaction, see this [note](#additional-notes))
 * Matplotlib >= 3.1
@@ -293,7 +299,7 @@ AUC@5    AUC@10  AUC@20  Prec    MScore
 <details>
   <summary>[Click to expand]</summary>
 
-The Phototourism results shown in the paper were produced using similar data as the test set from the [Image Matching Workshop](https://vision.uvic.ca/image-matching-challenge/), which does not contain publically available ground truth data for the test set. We list the pairs we used in `assets/phototourism_test_pairs.txt`. To reproduce similar numbers on this test set, please use the image matching workshop benchmark. While the challenge is still live, we cannot share the test set publically since we want to help maintain the integrity of the challenge.
+The Phototourism results shown in the paper were produced using similar data as the test set from the [Image Matching Challenge 2020](https://vision.uvic.ca/image-matching-challenge/), which holds the ground truth data private for the test set. We list the pairs we used in `assets/phototourism_test_pairs.txt`. To reproduce similar numbers on this test set, please submit to the challenge benchmark. While the challenge is still live, we cannot share the test set publically since we want to help maintain the integrity of the challenge. 
 
 </details>
 
@@ -363,7 +369,7 @@ If you use any ideas from the paper or code from this repo, please consider citi
                Daniel DeTone and
                Tomasz Malisiewicz and
                Andrew Rabinovich},
-  title     = {SuperGlue: Learning Feature Matching with Graph Neural Networks},
+  title     = {{SuperGlue}: Learning Feature Matching with Graph Neural Networks},
   booktitle = {CVPR},
   year      = {2020},
   url       = {https://arxiv.org/abs/1911.11763}
@@ -374,7 +380,7 @@ If you use any ideas from the paper or code from this repo, please consider citi
 * For the demo, we found that the keyboard interaction works well with OpenCV 4.1.2.30, older versions were less responsive and the newest version had a [OpenCV bug on Mac](https://stackoverflow.com/questions/60032540/opencv-cv2-imshow-is-not-working-because-of-the-qt)
 * We generally do not recommend to run SuperPoint+SuperGlue below 160x120 resolution (QQVGA) and above 2000x1500
 * We do not intend to release the SuperGlue training code.
-* We do not intend to release the SIFT-based SuperGlue models.
+* We do not intend to release the SIFT-based or homography SuperGlue models.
 
 ## Legal Disclaimer
 Magic Leap is proud to provide its latest samples, toolkits, and research projects on Github to foster development and gather feedback from the spatial computing community. Use of the resources within this repo is subject to (a) the license(s) included herein, or (b) if no license is included, Magic Leap's [Developer Agreement](https://id.magicleap.com/terms/developer), which is available on our [Developer Portal](https://developer.magicleap.com/).
