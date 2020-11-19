@@ -2,11 +2,22 @@ import os
 
 import torch
 
-from superglue import Matching
+from superglue import Matching, SuperPoint
 from superglue.utils import read_image
 
 
-def test_smoke():
+def test_superpoint():
+    model = SuperPoint(config={}).train(False)
+    img_path = os.path.join(os.path.dirname(__file__), 'lena_color.png')
+    img = read_image(img_path)
+    assert img.numpy().shape == (1, 1, 512, 512)
+
+    with torch.no_grad():
+        res = model({'image': img})
+    assert set(res.keys()) == {'keypoints', 'scores', 'descriptors'}
+
+
+def test_matching():
     model = Matching(config={}).train(False)
     img_path = os.path.join(os.path.dirname(__file__), 'lena_color.png')
     img1 = read_image(img_path)

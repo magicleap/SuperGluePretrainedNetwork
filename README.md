@@ -15,6 +15,27 @@ Please follow [the original repo](https://github.com/magicleap/SuperGluePretrain
 
 ## Usage
 
+Just extract SuperPoint descriptors: 
+```
+from superglue import SuperPoint
+from superglue.utils import read_image
+
+model = SuperPoint(config={}).train(False)
+img_path = os.path.join(os.path.dirname(__file__), 'lena_color.png')
+img = read_image(img_path)
+
+with torch.no_grad():
+    res = model({'image': img})
 ```
 
+Full pipeline: 
+```
+from superglue import Matching
+from superglue.utils import read_image
+
+model = Matching(config={}).train(False)
+img1 = read_image(img_path1)
+img2 = read_image(img_path2)
+with torch.no_grad():
+    res = model({'image0': img1, 'image1': img2})
 ```
