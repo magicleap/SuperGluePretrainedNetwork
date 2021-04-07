@@ -30,7 +30,6 @@ class MegaDepthWarpingDataset(torch.utils.data.Dataset):
     def __len__(self):
         return len(self.images_list)
 
-    @torch.no_grad()
     def __getitem__(self, idx):
         img_path = self.images_list[idx]
         image = cv2.imread(img_path)
@@ -51,7 +50,7 @@ class MegaDepthWarpingDataset(torch.utils.data.Dataset):
         warped = cv2.warpPerspective(src=image, M=H, dsize=(width, height))
         transformation = {
             'type': 'perspective',
-            'H': H
+            'H': torch.FloatTensor(H)
         }
 
         return {'image0': array_to_tensor(image), 'image1': array_to_tensor(warped), 'transformation': transformation}

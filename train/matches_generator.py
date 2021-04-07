@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 from models.superpoint import SuperPoint
-from train.train_utils import data_to_device
+from train.train_utils import data_to_device, min_stack, reproject_keypoints
 
 
 class SuperPointMatchesGenerator(nn.Module):
@@ -11,36 +11,50 @@ class SuperPointMatchesGenerator(nn.Module):
     Keypoints are detected and described using SuperPoint model.
     """
 
-    def __init__(self, superpoint_config):
+    def __init__(self, config):
         super(SuperPointMatchesGenerator, self).__init__()
-        self.superpoint = SuperPoint(superpoint_config)
+        self.superpoint = SuperPoint(config)
+        self.gt_positive_threshold = config['gt_positive_threshold']
 
     def forward(self, data):
         pred0 = self.superpoint({'image': data['image0']})
         pred1 = self.superpoint({'image': data['image1']})
 
-        pred0, pred1 = self.min_stack(pred0), self.min_stack(pred1)
-        print(pred0['scores'].shape, pred1['scores'].shape)
-        # TODO: establish ground truth correspondences given transformation
+        with torch.no_grad():
+            pred0, pred1 = min_stack(pred0), min_stack(pred1)
 
-    @staticmethod
-    def min_stack(data):
-        """
-        Stack batch of keypoints prediction into single tensor.
-        For each instance keep number of keypoints minimal in the batch. Discard other low confidence keypoints.
-        """
-        kpts_to_keep = min(data['keypoints'], key=lambda x: x.shape[0]).shape[0]
-        # get scores and indices of keypoints to keep in each batch element
-        indices_to_keep = [torch.topk(scores, kpts_to_keep, dim=0) for scores in data['scores']]
+            # establish ground truth correspondences given transformation
+            kpts0, kpts1 = pred0['keypoints'], pred1['keypoints']
+            desc0, desc1 = pred0['descriptors'], pred1['descriptors']
+            scores0, scores1 = pred0['scores'], pred1['scores']
+            transformation = data['transformation']
+            num0, num1 = kpts0.size(1), kpts1.size(1)
 
-        data_stacked = {k: [] for k in data.keys()}
-        for keypoints, descriptors, (scores, indices) in zip(data['keypoints'], data['descriptors'], indices_to_keep):
-            data_stacked['scores'].append(scores)
-            data_stacked['keypoints'].append(keypoints[indices])
-            data_stacked['descriptors'].append(descriptors[:, indices])
-        data_stacked = {k: torch.stack(v, dim=0) for k, v in data_stacked.items()}
+            kpts0_transformed = reproject_keypoints(kpts0, transformation)
+            reprojection_error = torch.cdist(kpts0_transformed, kpts1, p=2)  # batch_size x num0 x num1
 
-        return data_stacked
+            min_dist0, gt_matches0 = reprojection_error.min(2)  # batch_size x num0
+            min_dist1, gt_matches1 = reprojection_error.min(1)  # batch_size x num1
+            # remove matches that don't satisfy cross-check
+            device = gt_matches0.device
+            cross_check_inconsistent = torch.arange(num0, device=device).unsqueeze(0) != \
+                                       torch.gather(gt_matches1, dim=1, index=gt_matches0)
+            gt_matches0[cross_check_inconsistent] = -1
+            # remove matches with large distance
+            distance_inconsistent = min_dist0 > self.gt_positive_threshold
+            gt_matches0[distance_inconsistent] = -1
+
+        return {
+            'keypoints0': kpts0,
+            'keypoints1': kpts1,
+            'descriptors0': desc0,
+            'descriptors1': desc1,
+            'scores0': scores0,
+            'scores1': scores1,
+            'image0': data['image0'],
+            'image1': data['image1'],
+            'gt_matches0': gt_matches0,
+        }
 
 
 if __name__ == '__main__':
@@ -49,8 +63,10 @@ if __name__ == '__main__':
     device = torch.device('cuda:0')
 
     matches_generator = SuperPointMatchesGenerator(
-        superpoint_config=dict(
-            max_keypoints=2048
+        config=dict(
+            max_keypoints=2048,
+            keypoint_threshold=0.005,
+            gt_positive_threshold=3
         )
     )
     matches_generator.eval().to(device)
@@ -62,7 +78,7 @@ if __name__ == '__main__':
     ds = MegaDepthWarpingDataset(
         root_path='/datasets/extra_space2/ostap/MegaDepth/phoenix/S6/zl548/MegaDepth_v1',
         scenes_list=scenes_list,
-        target_size=(768, 768)
+        target_size=(512, 512)
     )
     dl = torch.utils.data.DataLoader(ds, batch_size=12, num_workers=12, shuffle=False)
     data = next(iter(dl))
