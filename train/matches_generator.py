@@ -20,29 +20,33 @@ class SuperPointMatchesGenerator(nn.Module):
         pred0 = self.superpoint({'image': data['image0']})
         pred1 = self.superpoint({'image': data['image1']})
 
-        with torch.no_grad():
-            pred0, pred1 = min_stack(pred0), min_stack(pred1)
+        pred0, pred1 = min_stack(pred0), min_stack(pred1)
 
-            # establish ground truth correspondences given transformation
-            kpts0, kpts1 = pred0['keypoints'], pred1['keypoints']
-            desc0, desc1 = pred0['descriptors'], pred1['descriptors']
-            scores0, scores1 = pred0['scores'], pred1['scores']
-            transformation = data['transformation']
-            num0, num1 = kpts0.size(1), kpts1.size(1)
+        kpts0, kpts1 = pred0['keypoints'], pred1['keypoints']
+        desc0, desc1 = pred0['descriptors'], pred1['descriptors']
+        scores0, scores1 = pred0['scores'], pred1['scores']
+        transformation = data['transformation']
+        num0, num1 = kpts0.size(1), kpts1.size(1)
 
-            kpts0_transformed = reproject_keypoints(kpts0, transformation)
-            reprojection_error = torch.cdist(kpts0_transformed, kpts1, p=2)  # batch_size x num0 x num1
+        # establish ground truth correspondences given transformation
+        kpts0_transformed = reproject_keypoints(kpts0, transformation)
+        reprojection_error = torch.cdist(kpts0_transformed, kpts1, p=2)  # batch_size x num0 x num1
 
-            min_dist0, gt_matches0 = reprojection_error.min(2)  # batch_size x num0
-            min_dist1, gt_matches1 = reprojection_error.min(1)  # batch_size x num1
-            # remove matches that don't satisfy cross-check
-            device = gt_matches0.device
-            cross_check_inconsistent = torch.arange(num0, device=device).unsqueeze(0) != \
-                                       torch.gather(gt_matches1, dim=1, index=gt_matches0)
-            gt_matches0[cross_check_inconsistent] = -1
-            # remove matches with large distance
-            distance_inconsistent = min_dist0 > self.gt_positive_threshold
-            gt_matches0[distance_inconsistent] = -1
+        min_dist0, gt_matches0 = reprojection_error.min(2)  # batch_size x num0
+        min_dist1, gt_matches1 = reprojection_error.min(1)  # batch_size x num1
+        # remove matches that don't satisfy cross-check
+        device = gt_matches0.device
+        cross_check_inconsistent = torch.arange(num0, device=device).unsqueeze(0) != gt_matches1.gather(1, gt_matches0)
+        gt_matches0[cross_check_inconsistent] = -1
+        # remove matches with large distance
+        distance_inconsistent = min_dist0 > self.gt_positive_threshold
+        gt_matches0[distance_inconsistent] = -1
+
+        # make matches for kpts1
+        gt_matches1.fill_(-1)
+        batch_idx, kpts0_idx = torch.where(gt_matches0 != -1)
+        kpts1_idx = gt_matches0[batch_idx, kpts0_idx]
+        gt_matches1[batch_idx, kpts1_idx] = kpts0_idx
 
         return {
             'keypoints0': kpts0,
@@ -54,22 +58,28 @@ class SuperPointMatchesGenerator(nn.Module):
             'image0': data['image0'],
             'image1': data['image1'],
             'gt_matches0': gt_matches0,
+            'gt_matches1': gt_matches1
         }
 
 
 if __name__ == '__main__':
     from datasets.megadepth import MegaDepthWarpingDataset
+    from models.superglue import SuperGlue
 
-    device = torch.device('cuda:0')
+    device = torch.device('cuda:2')
 
     matches_generator = SuperPointMatchesGenerator(
         config=dict(
-            max_keypoints=2048,
-            keypoint_threshold=0.005,
+            max_keypoints=1024,
+            keypoint_threshold=0,
             gt_positive_threshold=3
         )
     )
     matches_generator.eval().to(device)
+    superglue = SuperGlue(dict(
+        weights='/home/ostap/projects/DepthGlue/models/weights/superglue_outdoor.pth'
+    ))
+    superglue.eval().to(device)
 
     with open('../assets/megadepth_validation_scenes.txt') as f:
         scenes_list = f.readlines()
@@ -80,9 +90,10 @@ if __name__ == '__main__':
         scenes_list=scenes_list,
         target_size=(512, 512)
     )
-    dl = torch.utils.data.DataLoader(ds, batch_size=12, num_workers=12, shuffle=False)
+    dl = torch.utils.data.DataLoader(ds, batch_size=2, shuffle=False)
     data = next(iter(dl))
     data = data_to_device(data, device)
 
-    with torch.no_grad():
-        matches_generator(data)
+    data = matches_generator(data)
+    loss = superglue.training_step(data)
+    print(loss)
