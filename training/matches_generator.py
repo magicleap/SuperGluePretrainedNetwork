@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 from models.superpoint import SuperPoint
-from train.train_utils import data_to_device, min_stack, reproject_keypoints
+from training.train_utils import data_to_device, min_stack, reproject_keypoints
 
 
 class SuperPointMatchesGenerator(nn.Module):
@@ -55,8 +55,8 @@ class SuperPointMatchesGenerator(nn.Module):
             'descriptors1': desc1,
             'scores0': scores0,
             'scores1': scores1,
-            'image0': data['image0'],
-            'image1': data['image1'],
+            'image0_shape': data['image0'].shape,
+            'image1_shape': data['image1'].shape,
             'gt_matches0': gt_matches0,
             'gt_matches1': gt_matches1
         }
@@ -66,7 +66,7 @@ if __name__ == '__main__':
     from datasets.megadepth import MegaDepthWarpingDataset
     from models.superglue import SuperGlue
 
-    device = torch.device('cuda:2')
+    device = torch.device('cpu')
 
     matches_generator = SuperPointMatchesGenerator(
         config=dict(
@@ -79,18 +79,18 @@ if __name__ == '__main__':
     superglue = SuperGlue(dict(
         weights='/home/ostap/projects/DepthGlue/models/weights/superglue_outdoor.pth'
     ))
-    superglue.eval().to(device)
+    superglue.to(device)
 
-    with open('../assets/megadepth_validation_scenes.txt') as f:
+    with open('../assets/megadepth_train_scenes.txt') as f:
         scenes_list = f.readlines()
     scenes_list = [s.rstrip() for s in scenes_list]
 
     ds = MegaDepthWarpingDataset(
         root_path='/datasets/extra_space2/ostap/MegaDepth/phoenix/S6/zl548/MegaDepth_v1',
         scenes_list=scenes_list,
-        target_size=(512, 512)
+        target_size=(640, 480)
     )
-    dl = torch.utils.data.DataLoader(ds, batch_size=2, shuffle=False)
+    dl = torch.utils.data.DataLoader(ds, batch_size=16, shuffle=True)
     data = next(iter(dl))
     data = data_to_device(data, device)
 

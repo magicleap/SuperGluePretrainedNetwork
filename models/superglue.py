@@ -229,8 +229,8 @@ class SuperGlue(nn.Module):
     def __get_matching_scores(self, data):
 
         # Keypoint normalization.
-        kpts0 = normalize_keypoints(data['keypoints0'], data['image0'].shape)
-        kpts1 = normalize_keypoints(data['keypoints1'], data['image1'].shape)
+        kpts0 = normalize_keypoints(data['keypoints0'], data['image0_shape'])
+        kpts1 = normalize_keypoints(data['keypoints1'], data['image1_shape'])
 
         # Keypoint MLP encoder.
         desc0 = data['descriptors0'] + self.kenc(kpts0, data['scores0'])

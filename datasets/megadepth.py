@@ -24,7 +24,7 @@ class MegaDepthWarpingDataset(torch.utils.data.Dataset):
                 str(self.root_path / scene / 'dense*' / 'imgs' / '*')
             ) for scene in scenes_list])
         ]
-        self.target_size = target_size
+        self.target_size = tuple(target_size)
         self.color_aug_transform = color_aug_transform
 
     def __len__(self):
@@ -39,7 +39,8 @@ class MegaDepthWarpingDataset(torch.utils.data.Dataset):
         if self.color_aug_transform is not None:
             image = self.color_aug_transform(image=image)['image']
         image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
-        image = cv2.resize(image, self.target_size)
+        if self.target_size != -1:
+            image = cv2.resize(image, self.target_size)
 
         # warp image with random perspective transformation
         height, width = image.shape

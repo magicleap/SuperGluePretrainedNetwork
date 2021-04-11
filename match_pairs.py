@@ -51,7 +51,6 @@ import numpy as np
 import matplotlib.cm as cm
 import torch
 
-
 from models.matching import Matching
 from models.utils import (compute_pose_error, compute_epipolar_error,
                           estimate_pose, make_matching_plot,
@@ -61,17 +60,16 @@ from models.utils import (compute_pose_error, compute_epipolar_error,
 
 torch.set_grad_enabled(False)
 
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description='Image pair matching and pose evaluation with SuperGlue',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     parser.add_argument(
-        '--input_pairs', type=str, default='assets/scannet_sample_pairs_with_gt.txt',
+        '--input_pairs', type=str, default='/datasets/extra_space2/ostap/phototourism_temple_nara_japan_gt.txt',
         help='Path to the list of image pairs')
     parser.add_argument(
-        '--input_dir', type=str, default='assets/scannet_sample_images/',
+        '--input_dir', type=str, default='',
         help='Path to the directory that contains the images')
     parser.add_argument(
         '--output_dir', type=str, default='dump_match_pairs/',
@@ -91,7 +89,8 @@ if __name__ == '__main__':
         help='Resize the image after casting uint8 to float')
 
     parser.add_argument(
-        '--superglue', choices={'indoor', 'outdoor'}, default='indoor',
+        '--superglue',# default='/home/ostap/projects/DepthGlue/models/weights/superglue_outdoor.pth',
+        default='/home/ostap/logs/superglue/no_depth/2021-04-10-16-39-42/superglue_outdoor_epoch_7.pth',
         help='SuperGlue weights')
     parser.add_argument(
         '--max_keypoints', type=int, default=1024,
@@ -103,7 +102,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--nms_radius', type=int, default=4,
         help='SuperPoint Non Maximum Suppression (NMS) radius'
-        ' (Must be positive)')
+             ' (Must be positive)')
     parser.add_argument(
         '--sinkhorn_iterations', type=int, default=20,
         help='Number of Sinkhorn iterations performed by SuperGlue')
@@ -213,7 +212,7 @@ if __name__ == '__main__':
         eval_path = output_dir / '{}_{}_evaluation.npz'.format(stem0, stem1)
         viz_path = output_dir / '{}_{}_matches.{}'.format(stem0, stem1, opt.viz_extension)
         viz_eval_path = output_dir / \
-            '{}_{}_evaluation.{}'.format(stem0, stem1, opt.viz_extension)
+                        '{}_{}_evaluation.{}'.format(stem0, stem1, opt.viz_extension)
 
         # Handle --cache logic.
         do_match = True
@@ -265,7 +264,7 @@ if __name__ == '__main__':
             input_dir / name1, device, opt.resize, rot1, opt.resize_float)
         if image0 is None or image1 is None:
             print('Problem reading image pair: {} {}'.format(
-                input_dir/name0, input_dir/name1))
+                input_dir / name0, input_dir / name1))
             exit(1)
         timer.update('load_image')
 
@@ -408,7 +407,7 @@ if __name__ == '__main__':
             name0, name1 = pair[:2]
             stem0, stem1 = Path(name0).stem, Path(name1).stem
             eval_path = output_dir / \
-                '{}_{}_evaluation.npz'.format(stem0, stem1)
+                        '{}_{}_evaluation.npz'.format(stem0, stem1)
             results = np.load(eval_path)
             pose_error = np.maximum(results['error_t'], results['error_R'])
             pose_errors.append(pose_error)
@@ -416,9 +415,9 @@ if __name__ == '__main__':
             matching_scores.append(results['matching_score'])
         thresholds = [5, 10, 20]
         aucs = pose_auc(pose_errors, thresholds)
-        aucs = [100.*yy for yy in aucs]
-        prec = 100.*np.mean(precisions)
-        ms = 100.*np.mean(matching_scores)
+        aucs = [100. * yy for yy in aucs]
+        prec = 100. * np.mean(precisions)
+        ms = 100. * np.mean(matching_scores)
         print('Evaluation Results (mean over {} pairs):'.format(len(pairs)))
         print('AUC@5\t AUC@10\t AUC@20\t Prec\t MScore\t')
         print('{:.2f}\t {:.2f}\t {:.2f}\t {:.2f}\t {:.2f}\t'.format(
