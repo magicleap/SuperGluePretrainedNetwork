@@ -1,5 +1,3 @@
-import sys
-sys.path.append('/home/dobko/superglue_experiments/DepthGlue/')
 from pathlib import Path
 import argparse
 

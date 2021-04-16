@@ -26,7 +26,6 @@ class Evaluator:
         for i, data_dict in enumerate(dataset):
             # Load the image pair
             img1, img2 = data_dict['image0'].unsqueeze(0).to(self.device), data_dict['image1'].unsqueeze(0).to(self.device)
-            transf_type, H = data_dict['transformation']['type'], data_dict['transformation']['H']
 
             # Perform the matching.
             pred = matching({'image0': img1, 'image1': img2})
