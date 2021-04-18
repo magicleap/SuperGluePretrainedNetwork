@@ -90,7 +90,7 @@ if __name__ == '__main__':
 
     parser.add_argument(
         '--superglue',# default='/home/ostap/projects/DepthGlue/models/weights/superglue_outdoor.pth',
-        default='/home/ostap/logs/superglue/no_depth/2021-04-10-16-39-42/superglue_outdoor_epoch_7.pth',
+        default='/home/ostap/logs/superglue/no_depth/2021-04-14-13-30-25/superglue_outdoor_epoch_7.pth',
         help='SuperGlue weights')
     parser.add_argument(
         '--max_keypoints', type=int, default=1024,
@@ -175,7 +175,7 @@ if __name__ == '__main__':
                 'File \"{}\" needs 38 valid entries per row'.format(opt.input_pairs))
 
     # Load the SuperPoint and SuperGlue models.
-    device = 'cuda' if torch.cuda.is_available() and not opt.force_cpu else 'cpu'
+    device = 'cuda:0' if torch.cuda.is_available() and not opt.force_cpu else 'cpu'
     print('Running inference on device \"{}\"'.format(device))
     config = {
         'superpoint': {

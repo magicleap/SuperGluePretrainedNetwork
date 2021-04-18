@@ -44,6 +44,7 @@ from copy import deepcopy
 from pathlib import Path
 import torch
 from torch import nn
+import numpy as np
 
 
 def MLP(channels: list, do_bn=True):
@@ -243,6 +244,7 @@ class SuperGlue(nn.Module):
         mdesc0, mdesc1 = self.final_proj(desc0), self.final_proj(desc1)
 
         # Compute matching descriptor distance.
+
         scores = torch.einsum('bdn,bdm->bnm', mdesc0, mdesc1)
         scores = scores / self.config['descriptor_dim'] ** .5
 
@@ -251,7 +253,11 @@ class SuperGlue(nn.Module):
             scores, self.bin_score,
             iters=self.config['sinkhorn_iterations'])
 
-        return scores
+        return {
+            'scores': scores,
+            'mdesc0': mdesc0,
+            'mdesc1': mdesc1
+        }
 
     def forward(self, data):
         """Run SuperGlue inference on a pair of keypoints and descriptors"""
@@ -266,7 +272,7 @@ class SuperGlue(nn.Module):
                 'matching_scores1': kpts1.new_zeros(shape1),
             }
 
-        scores = self._get_matching_scores(data)
+        scores = self._get_matching_scores(data)['scores']
 
         # Get the matches with score above "match_threshold".
         max0, max1 = scores[:, :-1, :-1].max(2), scores[:, :-1, :-1].max(1)
@@ -296,12 +302,22 @@ class SuperGlue(nn.Module):
                 'skip_train_step': True
             }
 
-        scores = self._get_matching_scores(data)
+        pred = self._get_matching_scores(data)
+        scores = pred['scores']
+        mdesc0, mdesc1 = pred['mdesc0'], pred['mdesc1']
+
+        dist = torch.cdist(mdesc0.permute(0, 2, 1), mdesc1.permute(0, 2, 1))
+        # print(dist.shape, scores.shape, mdesc0.shape, mdesc1.shape)
         gt_matches0, gt_matches1 = data['gt_matches0'], data['gt_matches1']
 
+        # loss for keypoints with gt match
         batch_idx, idx_kpts0 = torch.where(gt_matches0 >= 0)
         idx_kpts1 = gt_matches0[batch_idx, idx_kpts0]
         matched_loss = -scores[batch_idx, idx_kpts0, idx_kpts1].sum()
+        matched_triplet_loss = self.get_matched_triplet_loss(
+            desc0=mdesc0, desc1=mdesc1,
+            dist=dist, indexes=(batch_idx, idx_kpts0, idx_kpts1)
+        )
 
         batch_idx, idx_kpts0 = torch.where(gt_matches0 == -1)
         unmatched0_loss = -scores[batch_idx, idx_kpts0, -1].sum()
@@ -311,5 +327,36 @@ class SuperGlue(nn.Module):
 
         return {
             'skip_train_step': False,
-            'loss': (matched_loss + unmatched0_loss + unmatched1_loss) / scores.size(0)
+            'loss': (matched_loss + unmatched0_loss + unmatched1_loss) / scores.size(0),
+            'triplet_loss': matched_triplet_loss / scores.size(0)
         }
+
+    def get_matched_triplet_loss(self, desc0, desc1, dist, indexes):
+        # criterion = nn.TripletMarginLoss(margin=self.config['triplet_margin'], reduction='sum')
+
+        batch_idx, idx_kpts0, idx_kpts1 = indexes
+
+        # get anchors on each image
+        anchors0 = desc0[batch_idx, :, idx_kpts0]
+        anchors1 = desc1[batch_idx, :, idx_kpts1]
+        # positives are corresponding anchors on other image
+        positive0, positive1 = anchors1, anchors0
+
+        dist_detached = dist.detach().clone()
+        dist_detached[batch_idx, idx_kpts0, idx_kpts1] = np.inf
+        idx_kpts0_closest_to_1 = torch.argmin(dist_detached, dim=1)
+        idx_kpts1_closest_to_0 = torch.argmin(dist_detached, dim=2)
+
+        idx_kpts1_neg = idx_kpts1_closest_to_0[batch_idx, idx_kpts0]
+        idx_kpts0_neg = idx_kpts0_closest_to_1[batch_idx, idx_kpts1]
+        negatives0 = desc1[batch_idx, :, idx_kpts1_neg]
+        negatives1 = desc0[batch_idx, :, idx_kpts0_neg]
+
+        return self.lowe_margin_loss(anchors0, positive0, negatives0) +\
+               self.lowe_margin_loss(anchors1, positive1, negatives1)
+
+    def lowe_margin_loss(self, anchors, positive, negatives):
+        margin = self.config['lowe_margin']
+        d_ap = (anchors - positive).pow(2).sum(-1).pow(0.5)
+        d_an = (anchors - negatives).pow(2).sum(-1).pow(0.5)
+        return torch.maximum(d_ap - margin * d_an, torch.tensor(0, device=anchors.device)).sum()

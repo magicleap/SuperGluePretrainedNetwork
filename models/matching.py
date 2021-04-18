@@ -43,7 +43,7 @@
 import torch
 
 from .superpoint import SuperPoint
-from .superglue import SuperGlue
+from .superglue_v2_metric_learning import SuperGlue
 
 
 class Matching(torch.nn.Module):
@@ -77,8 +77,6 @@ class Matching(torch.nn.Module):
         for k in data:
             if isinstance(data[k], (list, tuple)):
                 data[k] = torch.stack(data[k])
-        data['image0_shape'] = data['image0'].shape
-        data['image1_shape'] = data['image1'].shape
 
         # Perform the matching
         pred = {**pred, **self.superglue(data)}
