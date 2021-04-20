@@ -1,7 +1,7 @@
 import argparse
 import random
 import numpy as np
-from datasets.megadepth import MegaDepthWarpingDataset
+from datasets.megadepth import MegaDepthPairsDataset
 import os
 import torch.multiprocessing
 from tqdm import tqdm
@@ -34,7 +34,11 @@ parser.add_argument(
     help='SuperPoint Non Maximum Suppression (NMS) radius'
          ' (Must be positive)')
 parser.add_argument(
-    '--gt_positive_threshold', type=int, default=3,
+    '--gt_positive_threshold', type=int, default=5,
+    help='Maximum reprohection error for 2 keypoints to be considered as a ground truth match in matching generator.'
+         ' (Must be positive)')
+parser.add_argument(
+    '--gt_negative_threshold', type=int, default=15,
     help='Maximum reprohection error for 2 keypoints to be considered as a ground truth match in matching generator.'
          ' (Must be positive)')
 parser.add_argument(
@@ -51,13 +55,13 @@ parser.add_argument(
     '--batch_size', type=int, default=4,
     help='batch_size')
 parser.add_argument(
-    '--num_workers', type=int, default=4,
+    '--num_workers', type=int, default=6,
     help='Number of dataset workers')
 parser.add_argument(
     '--device', type=str, default='cuda:0',
     help='Device to train on')
 parser.add_argument(
-    '--data_path', type=str, default='/datasets/extra_space2/ostap/MegaDepth/phoenix/S6/zl548/MegaDepth_v1',
+    '--data_path', type=str, default='/datasets/extra_space2/ostap/MegaDepth',
     help='Path to the directory of training imgs.')
 parser.add_argument(
     '--epoch', type=int, default=20,
@@ -72,7 +76,7 @@ parser.add_argument(
     '--scheduler_gamma', type=float, default=0.999997,
     help='Scheduler lr multiplier')
 parser.add_argument(
-    '--log_path', type=str, default='/home/ostap/logs/superglue/no_depth',
+    '--log_path', type=str, default='/home/ostap/logs/superglue/pairs3d',
     help='Path to directory with experiments')
 parser.add_argument(
     '--log_every_step', type=int, default=1000,
@@ -99,7 +103,9 @@ if __name__ == '__main__':
             'nms_radius': opt.nms_radius,
             'keypoint_threshold': opt.keypoint_threshold,
             'max_keypoints': opt.max_keypoints,
-            'gt_positive_threshold': opt.gt_positive_threshold
+            'gt_positive_threshold': opt.gt_positive_threshold,
+            'gt_negative_threshold': opt.gt_negative_threshold
+
         },
         'superglue': {
             'weights': opt.superglue if opt.superglue != 'none' else None,
@@ -128,28 +134,18 @@ if __name__ == '__main__':
     #     val_scenes_list = [s.rstrip() for s in val_scenes_list]
 
     # load training data
-    train_ds = MegaDepthWarpingDataset(
+    train_ds = MegaDepthPairsDataset(
         root_path=opt.data_path,
-        scenes_list=train_scenes_list,
+        scenes_list=['0012'],
         target_size=opt.resize
     )
-    # val_ds = MegaDepthWarpingDataset(
-    #     root_path=opt.data_path,
-    #     scenes_list=val_scenes_list,
-    #     target_size=opt.resize
-    # )
+
     train_dl = torch.utils.data.DataLoader(
         dataset=train_ds,
         shuffle=True,
         batch_size=opt.batch_size,
         num_workers=opt.num_workers
     )
-    # val_dl = torch.utils.data.DataLoader(
-    #     dataset=val_ds,
-    #     shuffle=False,
-    #     batch_size=opt.batch_size,
-    #     num_workers=opt.num_workers
-    # )
 
     device = torch.device(opt.device)
     device = torch.device(opt.device)
