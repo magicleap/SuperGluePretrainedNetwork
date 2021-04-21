@@ -1,8 +1,7 @@
-from pathlib import Path
 import argparse
 
 from evaluator import Evaluator
-from datasets.megadepth import MegaDepthWarpingDataset
+from datasets.megadepth import MegaDepthWarpingDataset, MegaDepthPairsDataset
 
 
 if __name__ == '__main__':
@@ -11,10 +10,10 @@ if __name__ == '__main__':
         formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     parser.add_argument(
-        '--data_dir', type=str, default='/datasets/extra_space2/ostap/MegaDepth/phoenix/S6/zl548/MegaDepth_v1',
+        '--data_dir', type=str, default='/datasets/extra_space2/ostap/MegaDepth',
         help='Path to the directory of images')
     parser.add_argument(
-        '--scenes_txt', type=str, default='assets/megadepth_validation_scenes.txt',
+        '--scenes_txt', type=str, default='/home/dobko/superglue_experiments/DepthGlue/assets/megadepth_validation_scenes.txt',
         help='Path to the file with scenes names')
     parser.add_argument(
         '--size_image', type=int, default=352,
@@ -62,7 +61,7 @@ if __name__ == '__main__':
         scenes_list = f.readlines()
     scenes_list = [s.rstrip() for s in scenes_list]
 
-    dataset = MegaDepthWarpingDataset(
+    dataset = MegaDepthPairsDataset(
         root_path=opt.data_dir,
         scenes_list=scenes_list,
         target_size=(opt.size_image, opt.size_image)

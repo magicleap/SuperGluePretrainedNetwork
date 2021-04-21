@@ -11,7 +11,7 @@ from models.matching import Matching
 
 class Evaluator:
     def __init__(self, models_config):
-        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        self.device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
         self.config = models_config
         self.pose_errors = []
         self.precisions = []
@@ -39,11 +39,16 @@ class Evaluator:
             mkpts0 = kpts0[valid]
             mkpts1 = kpts1[matches[valid]]
 
-            # Estimate the pose and compute the pose error.
-            K0 = data_dict['transformation']['K0']
-            K1 = data_dict['transformation']['K1']
-            T_0to1 = data_dict['transformation']['T_0to1'].astype(float).reshape(4, 4)
+            # Load intrinsics, translation vector and rotation matrix
+            K0 = data_dict['transformation']['K0'].detach().numpy()
+            K1 = data_dict['transformation']['K1'].detach().numpy()
 
+            R = data_dict['transformation']['R'].detach().numpy()
+            T = data_dict['transformation']['T'].detach().numpy()
+            R = np.vstack([R, [0, 0, 0]])
+            T_0to1 = np.column_stack([R, np.append(T, [[1]])])
+
+            # Estimate the pose and compute the pose error.
             epi_errs = compute_epipolar_error(mkpts0, mkpts1, T_0to1, K0, K1)
             correct = epi_errs < 5e-4
             num_correct = np.sum(correct)
