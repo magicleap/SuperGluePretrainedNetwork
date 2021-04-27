@@ -1,6 +1,7 @@
 import numpy as np
 from pathlib import Path
 import torch
+import tqdm
 
 from models.utils import (compute_pose_error, compute_epipolar_error,
                           estimate_pose, AverageTimer, pose_auc,
@@ -10,22 +11,23 @@ from models.matching import Matching
 
 
 class Evaluator:
-    def __init__(self, models_config):
-        self.device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
+    def __init__(self, models_config, device):
+        self.device = device
         self.config = models_config
         self.pose_errors = []
         self.precisions = []
         self.matching_scores = []
 
-    def evaluate(self, dataset):
+    @torch.no_grad()
+    def evaluate(self, dataloader):
         print('Running inference on device \"{}\"'.format(self.device))
         timer = AverageTimer(newline=True)
 
         matching = Matching(self.config).eval().to(self.device)
 
-        for i, data_dict in enumerate(dataset):
+        for i, data_dict in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
             # Load the image pair
-            img1, img2 = data_dict['image0'].unsqueeze(0).to(self.device), data_dict['image1'].unsqueeze(0).to(self.device)
+            img1, img2 = data_dict['image0'].to(self.device), data_dict['image1'].to(self.device)
 
             # Perform the matching.
             pred = matching({'image0': img1, 'image1': img2})
@@ -40,11 +42,11 @@ class Evaluator:
             mkpts1 = kpts1[matches[valid]]
 
             # Load intrinsics, translation vector and rotation matrix
-            K0 = data_dict['transformation']['K0'].detach().numpy()
-            K1 = data_dict['transformation']['K1'].detach().numpy()
+            K0 = data_dict['transformation']['K0'][0].numpy()
+            K1 = data_dict['transformation']['K1'][0].numpy()
 
-            R = data_dict['transformation']['R'].detach().numpy()
-            T = data_dict['transformation']['T'].detach().numpy()
+            R = data_dict['transformation']['R'][0].numpy()
+            T = data_dict['transformation']['T'][0].numpy()
             R = np.vstack([R, [0, 0, 0]])
             T_0to1 = np.column_stack([R, np.append(T, [[1]])])
 

@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 import numpy as np
 
 
@@ -116,6 +117,16 @@ def reproject_3d(kpts, K0, K1, T, R, depth0, eps=1e-8):
     kpts_transformed = torch.matmul(kpts_transformed, K1_t)
     kpts_transformed = kpts_transformed[..., :2] / (kpts_transformed[..., 2].unsqueeze(-1) + eps)
     return kpts_transformed, mask
+
+
+def pairwise_cosine_dist(x1, x2):
+    """
+    Return pairwise half of cosine distance in range [0, 1].
+    dist = (1 - cos(theta)) / 2
+    """
+    x1 = F.normalize(x1, dim=-1)
+    x2 = F.normalize(x2, dim=-1)
+    return 0.25 * torch.cdist(x1, x2).pow(2)
 
 
 if __name__ == '__main__':

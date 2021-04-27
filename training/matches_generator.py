@@ -37,7 +37,7 @@ class SuperPointMatchesGenerator(nn.Module):
         kpts1_transformed, mask1 = reproject_keypoints(kpts1, transformation_inv)
 
         reprojection_error_0_to_1 = torch.cdist(kpts0_transformed, kpts1, p=2)  # batch_size x num0 x num1
-        reprojection_error_1_to_0 = torch.cdist(kpts1_transformed, kpts0, p=2)  # batch_size x num0 x num1
+        reprojection_error_1_to_0 = torch.cdist(kpts1_transformed, kpts0, p=2)  # batch_size x num1 x num0
 
         min_dist0, gt_matches0 = reprojection_error_0_to_1.min(2)  # batch_size x num0
         min_dist1, gt_matches1 = reprojection_error_1_to_0.min(2)  # batch_size x num1
@@ -46,9 +46,9 @@ class SuperPointMatchesGenerator(nn.Module):
         cross_check_inconsistent = torch.arange(num0, device=device).unsqueeze(0) != gt_matches1.gather(1, gt_matches0)
         gt_matches0[cross_check_inconsistent] = self.UNMATCHED_INDEX
         # remove matches with large distance
-        gt_matches0[~mask0] = self.IGNORE_INDEX
         gt_matches0[min_dist0 > self.gt_positive_threshold] = self.IGNORE_INDEX
         gt_matches0[min_dist0 > self.gt_negative_threshold] = self.UNMATCHED_INDEX
+        gt_matches0[~mask0] = self.IGNORE_INDEX
 
         # make matches for kpts1
         gt_matches1.fill_(self.IGNORE_INDEX)

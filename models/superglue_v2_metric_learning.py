@@ -46,6 +46,8 @@ import torch
 from torch import nn
 import numpy as np
 
+from training.train_utils import pairwise_cosine_dist
+
 
 def MLP(channels: list, do_bn=True):
     """ Multi-layer perceptron """
@@ -223,7 +225,7 @@ class SuperGlue(nn.Module):
         # load weights is path is given
         if self.config.get('weights', None) is not None:
             path = self.config['weights']
-            self.load_state_dict(torch.load(str(path)))
+            self.load_state_dict(torch.load(str(path), map_location='cpu'))
             print('Loaded SuperGlue model (\"{}\" weights)'.format(
                 self.config['weights']))
 
@@ -306,57 +308,55 @@ class SuperGlue(nn.Module):
         scores = pred['scores']
         mdesc0, mdesc1 = pred['mdesc0'], pred['mdesc1']
 
-        dist = torch.cdist(mdesc0.permute(0, 2, 1), mdesc1.permute(0, 2, 1))
-        # print(dist.shape, scores.shape, mdesc0.shape, mdesc1.shape)
+        dist = pairwise_cosine_dist(mdesc0.permute(0, 2, 1), mdesc1.permute(0, 2, 1))
         gt_matches0, gt_matches1 = data['gt_matches0'], data['gt_matches1']
 
         # loss for keypoints with gt match
         batch_idx, idx_kpts0 = torch.where(gt_matches0 >= 0)
+        _, inv_idx, counts = torch.unique_consecutive(batch_idx, return_inverse=True, return_counts=True)
+        mean_weights = (1 / counts)[inv_idx]
         idx_kpts1 = gt_matches0[batch_idx, idx_kpts0]
-        matched_loss = -scores[batch_idx, idx_kpts0, idx_kpts1].sum()
+        matched_loss = (-scores[batch_idx, idx_kpts0, idx_kpts1] * mean_weights).sum()
         matched_triplet_loss = self.get_matched_triplet_loss(
             desc0=mdesc0, desc1=mdesc1,
-            dist=dist, indexes=(batch_idx, idx_kpts0, idx_kpts1)
+            dist=dist, indexes=(batch_idx, idx_kpts0, idx_kpts1),
+            mean_weights=mean_weights
         )
 
+        # loss for unmatched keypoints in the image 0
         batch_idx, idx_kpts0 = torch.where(gt_matches0 == -1)
-        unmatched0_loss = -scores[batch_idx, idx_kpts0, -1].sum()
+        _, inv_idx, counts = torch.unique_consecutive(batch_idx, return_inverse=True, return_counts=True)
+        unmatched0_loss = (-scores[batch_idx, idx_kpts0, -1] * (1 / counts)[inv_idx]).sum()
 
+        # loss for unmatched keypoints in the image 1
         batch_idx, idx_kpts1 = torch.where(gt_matches1 == -1)
-        unmatched1_loss = -scores[batch_idx, -1, idx_kpts1].sum()
+        _, inv_idx, counts = torch.unique_consecutive(batch_idx, return_inverse=True, return_counts=True)
+        unmatched1_loss = (-scores[batch_idx, -1, idx_kpts1] * (1 / counts)[inv_idx]).sum()
 
         return {
             'skip_train_step': False,
-            'loss': (matched_loss + unmatched0_loss + unmatched1_loss) / scores.size(0),
+            'loss': (matched_loss + 0.5 * (unmatched0_loss + unmatched1_loss)) / scores.size(0),
             'triplet_loss': matched_triplet_loss / scores.size(0)
         }
 
-    def get_matched_triplet_loss(self, desc0, desc1, dist, indexes):
-        # criterion = nn.TripletMarginLoss(margin=self.config['triplet_margin'], reduction='sum')
-
+    def get_matched_triplet_loss(self, desc0, desc1, dist, indexes, mean_weights):
+        margin = self.config['triplet_margin']
         batch_idx, idx_kpts0, idx_kpts1 = indexes
-
-        # get anchors on each image
-        anchors0 = desc0[batch_idx, :, idx_kpts0]
-        anchors1 = desc1[batch_idx, :, idx_kpts1]
-        # positives are corresponding anchors on other image
-        positive0, positive1 = anchors1, anchors0
+        # distance between anchor and positive
+        dist_ap = dist[batch_idx, idx_kpts0, idx_kpts1]
 
         dist_detached = dist.detach().clone()
         dist_detached[batch_idx, idx_kpts0, idx_kpts1] = np.inf
         idx_kpts0_closest_to_1 = torch.argmin(dist_detached, dim=1)
         idx_kpts1_closest_to_0 = torch.argmin(dist_detached, dim=2)
-
         idx_kpts1_neg = idx_kpts1_closest_to_0[batch_idx, idx_kpts0]
         idx_kpts0_neg = idx_kpts0_closest_to_1[batch_idx, idx_kpts1]
-        negatives0 = desc1[batch_idx, :, idx_kpts1_neg]
-        negatives1 = desc0[batch_idx, :, idx_kpts0_neg]
 
-        return self.lowe_margin_loss(anchors0, positive0, negatives0) +\
-               self.lowe_margin_loss(anchors1, positive1, negatives1)
+        dist_an0 = dist[batch_idx, idx_kpts0, idx_kpts1_neg]
+        dist_an1 = dist[batch_idx, idx_kpts1, idx_kpts0_neg]
 
-    def lowe_margin_loss(self, anchors, positive, negatives):
-        margin = self.config['lowe_margin']
-        d_ap = (anchors - positive).pow(2).sum(-1).pow(0.5)
-        d_an = (anchors - negatives).pow(2).sum(-1).pow(0.5)
-        return torch.maximum(d_ap - margin * d_an, torch.tensor(0, device=anchors.device)).sum()
+        loss0 = torch.maximum(dist_ap - dist_an0 + margin, torch.tensor(0, device=dist.device))
+        loss1 = torch.maximum(dist_ap - dist_an1 + margin, torch.tensor(0, device=dist.device))
+        return (loss0 * mean_weights).sum() + (loss1 * mean_weights).sum()
+
+

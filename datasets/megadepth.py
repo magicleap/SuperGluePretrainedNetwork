@@ -60,20 +60,27 @@ class MegaDepthWarpingDataset(torch.utils.data.Dataset):
 
 
 class MegaDepthPairsDataset(torch.utils.data.Dataset):
-    def __init__(self, root_path, scenes_list, target_size, color_aug_transform=None):
+    def __init__(self, root_path, scenes_list, target_size, color_aug_transform=None, train=True):
         self.root_path = Path(root_path)
         self.target_size = tuple(target_size)
         self.color_aug_transform = color_aug_transform
+        self.train = train
 
         pairs_metadata_files = {scene: self.root_path / 'Undistorted-SfM' / scene / 'sparse-txt' / 'pairs.txt' for scene
                                 in scenes_list}
         self.image_pairs = OrderedDict()
         for scene, pairs_path in pairs_metadata_files.items():
-            with open(pairs_path) as f:
-                pairs_metadata = f.readlines()
-                pairs_metadata = list(map(lambda x: x.rstrip(), pairs_metadata))
+            try:
+                with open(pairs_path) as f:
+                    pairs_metadata = f.readlines()
+                    pairs_metadata = list(map(lambda x: x.rstrip(), pairs_metadata))
+            except FileNotFoundError:
+                pairs_metadata = []
             self.image_pairs[scene] = pairs_metadata
         self.scene_pairs_numbers = OrderedDict([(k, len(v)) for k, v in self.image_pairs.items()])
+
+        if not train: #validation
+            self.scene_pairs_numbers = {k: min(v, 100) for k, v in self.scene_pairs_numbers.items()}
 
     def __len__(self):
         return sum(self.scene_pairs_numbers.values())

@@ -299,7 +299,9 @@ def estimate_pose(kpts0, kpts1, K0, K1, thresh, conf=0.99999):
         kpts0, kpts1, np.eye(3), threshold=norm_thresh, prob=conf,
         method=cv2.RANSAC)
 
-    assert E is not None
+    # assert E is not None
+    if E is None:
+        return None
 
     best_num_inliers = 0
     ret = None
@@ -405,10 +407,12 @@ def pose_auc(errors, thresholds):
         last_index = np.searchsorted(errors, t)
         r = np.r_[recall[:last_index], recall[last_index-1]]
         e = np.r_[errors[:last_index], t]
+
         aucs.append(np.trapz(r, x=e)/t)
     return aucs
 
-
+if __name__ == '__main__':
+    print(pose_auc(errors=[1, 2, 3, 4, 5], thresholds=[3]))
 # --- VISUALIZATION ---
 
 
