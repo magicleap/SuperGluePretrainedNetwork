@@ -9,6 +9,7 @@ from datetime import datetime
 import yaml
 from torch.utils.tensorboard import SummaryWriter
 
+
 from training.matches_generator import SuperPointMatchesGenerator
 from models.superglue_v2_metric_learning import SuperGlue
 from training.average_meter import AverageMeter
@@ -74,7 +75,7 @@ parser.add_argument(
     '--grad_acum_steps', type=int, default=4,
     help='Number of iterations after which decrease learning rate')
 parser.add_argument(
-    '--scheduler_gamma', type=float, default=0.99997,
+    '--scheduler_gamma', type=float, default=0.999992,
     help='Scheduler lr multiplier')
 parser.add_argument(
     '--log_path', type=str, default='/home/ostap/logs/superglue/pairs3d',
@@ -88,6 +89,17 @@ parser.add_argument(
 parser.add_argument(
     '--triplet_margin', type=float, default=0.5,
     help='Log train loss every number of steps')
+parser.add_argument(
+    '--start_iteration', type=int, default=0,
+    help='Iteration at which start logging')
+
+parser.add_argument(
+    '--triplet_weight', type=float, default=1.0,
+    help='Weight on triplet loss')
+
+parser.add_argument(
+    '--ce_weight', type=float, default=1.0,
+    help='Weight on CE loss')
 
 if __name__ == '__main__':
 
@@ -167,7 +179,10 @@ if __name__ == '__main__':
     superpoint = SuperPointMatchesGenerator(config.get('superpoint', {})).eval().to(device)
     superglue = SuperGlue(config.get('superglue', {})).to(device)
 
-    optimizer = torch.optim.Adam(superglue.parameters(), lr=opt.learning_rate)
+    learning_rate = opt.learning_rate * (opt.scheduler_gamma ** (opt.start_iteration // opt.grad_acum_steps))
+    print(f'Learning rate: {learning_rate}')
+
+    optimizer = torch.optim.Adam(superglue.parameters(), lr=learning_rate)
     scheduler = torch.optim.lr_scheduler.StepLR(
         optimizer=optimizer,
         step_size=1,
@@ -175,7 +190,7 @@ if __name__ == '__main__':
     )
     loss_meter, triplet_loss_meter = AverageMeter(), AverageMeter()
 
-    iter_num = 0
+    iter_num = opt.start_iteration
     # start training
     for epoch in range(1, opt.epoch + 1):
         status_bar = tqdm(total=len(train_dl))
@@ -194,7 +209,7 @@ if __name__ == '__main__':
             # process loss
             loss = pred['loss']
             triplet_loss = pred['triplet_loss']
-            (loss + triplet_loss).backward()
+            (opt.ce_weight * loss + opt.triplet_weight * triplet_loss).backward()
             loss_meter.add_value(loss.item())
             triplet_loss_meter.add_value(triplet_loss.item())
 
@@ -206,7 +221,6 @@ if __name__ == '__main__':
 
             status_bar.update()
             status_bar.set_postfix(loss=loss.item(), triplet=triplet_loss.item())
-
 
             if iter_num % opt.log_every_step == 0:
                 report_loss_value = loss_meter.get_value(last_values=opt.log_every_step)
@@ -232,10 +246,9 @@ if __name__ == '__main__':
                     }
                 }
                 val_evaluator = Evaluator(model_config, device=device)
-                val_metrics  = val_evaluator.evaluate(val_dl)
+                val_metrics = val_evaluator.evaluate(val_dl)
                 for k, v in val_metrics.items():
                     writer.add_scalar(f'Val {k}', v, iter_num)
-
 
         writer.add_scalar('Train Loss (avg epoch)', loss_meter.get_value(), epoch)
         writer.add_scalar('Train triplet Loss (avg epoch)', triplet_loss_meter.get_value(), epoch)

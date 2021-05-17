@@ -129,6 +129,19 @@ def pairwise_cosine_dist(x1, x2):
     return 0.25 * torch.cdist(x1, x2).pow(2)
 
 
+class ValueScheduler:
+    def __init__(self, name, start_value, gamma):
+        self.name = name
+        self.value = start_value
+        self.gamma = gamma
+
+    def step(self):
+        self.value *= self.gamma
+
+    def get_value(self):
+        return self.name, self.value
+
+
 if __name__ == '__main__':
     import cv2
 

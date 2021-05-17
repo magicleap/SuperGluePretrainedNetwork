@@ -251,7 +251,7 @@ class SuperGlue(nn.Module):
         scores = scores / self.config['descriptor_dim'] ** .5
 
         # Run the optimal transport.
-        scores = log_optimal_transport(
+        scores= log_optimal_transport(
             scores, self.bin_score,
             iters=self.config['sinkhorn_iterations'])
 
@@ -274,7 +274,8 @@ class SuperGlue(nn.Module):
                 'matching_scores1': kpts1.new_zeros(shape1),
             }
 
-        scores = self._get_matching_scores(data)['scores']
+        pred = self._get_matching_scores(data)
+        scores = pred['scores']
 
         # Get the matches with score above "match_threshold".
         max0, max1 = scores[:, :-1, :-1].max(2), scores[:, :-1, :-1].max(1)
@@ -294,6 +295,7 @@ class SuperGlue(nn.Module):
             'matches1': indices1,  # use -1 for invalid match
             'matching_scores0': mscores0,
             'matching_scores1': mscores1,
+            **pred
         }
 
     def training_step(self, data):
@@ -315,10 +317,10 @@ class SuperGlue(nn.Module):
         batch_idx, idx_kpts0 = torch.where(gt_matches0 >= 0)
         _, inv_idx, counts = torch.unique_consecutive(batch_idx, return_inverse=True, return_counts=True)
         mean_weights = (1 / counts)[inv_idx]
+
         idx_kpts1 = gt_matches0[batch_idx, idx_kpts0]
         matched_loss = (-scores[batch_idx, idx_kpts0, idx_kpts1] * mean_weights).sum()
         matched_triplet_loss = self.get_matched_triplet_loss(
-            desc0=mdesc0, desc1=mdesc1,
             dist=dist, indexes=(batch_idx, idx_kpts0, idx_kpts1),
             mean_weights=mean_weights
         )
@@ -326,21 +328,37 @@ class SuperGlue(nn.Module):
         # loss for unmatched keypoints in the image 0
         batch_idx, idx_kpts0 = torch.where(gt_matches0 == -1)
         _, inv_idx, counts = torch.unique_consecutive(batch_idx, return_inverse=True, return_counts=True)
-        unmatched0_loss = (-scores[batch_idx, idx_kpts0, -1] * (1 / counts)[inv_idx]).sum()
+        mean_weights = (1 / counts)[inv_idx]
+
+        unmatched0_loss = (-scores[batch_idx, idx_kpts0, -1] * mean_weights).sum()
+        unmatched0_margin_loss = self.get_unmatched_margin_loss(
+            dist=dist, indexes=(batch_idx, idx_kpts0),
+            mean_weights=mean_weights, zero_to_one=True
+        )
 
         # loss for unmatched keypoints in the image 1
         batch_idx, idx_kpts1 = torch.where(gt_matches1 == -1)
         _, inv_idx, counts = torch.unique_consecutive(batch_idx, return_inverse=True, return_counts=True)
-        unmatched1_loss = (-scores[batch_idx, -1, idx_kpts1] * (1 / counts)[inv_idx]).sum()
+        mean_weights = (1 / counts)[inv_idx]
 
+        unmatched1_loss = (-scores[batch_idx, -1, idx_kpts1] * mean_weights).sum()
+        unmatched1_margin_loss = self.get_unmatched_margin_loss(
+            dist=dist, indexes=(batch_idx, idx_kpts1),
+            mean_weights=mean_weights, zero_to_one=False
+        )
         return {
+            # 'sinkhorn_scores': scores,
+            # 'mdesc0': mdesc0,
+            # 'mdesc1': mdesc1,
             'skip_train_step': False,
             'loss': (matched_loss + 0.5 * (unmatched0_loss + unmatched1_loss)) / scores.size(0),
-            'triplet_loss': matched_triplet_loss / scores.size(0)
+            'triplet_loss': (matched_triplet_loss + unmatched0_margin_loss + unmatched1_margin_loss) / scores.size(0)
         }
 
-    def get_matched_triplet_loss(self, desc0, desc1, dist, indexes, mean_weights):
+    def get_matched_triplet_loss(self, dist, indexes, mean_weights):
         margin = self.config['triplet_margin']
+        if margin == -1:
+            return torch.tensor(0, device=dist.device)
         batch_idx, idx_kpts0, idx_kpts1 = indexes
         # distance between anchor and positive
         dist_ap = dist[batch_idx, idx_kpts0, idx_kpts1]
@@ -358,5 +376,24 @@ class SuperGlue(nn.Module):
         loss0 = torch.maximum(dist_ap - dist_an0 + margin, torch.tensor(0, device=dist.device))
         loss1 = torch.maximum(dist_ap - dist_an1 + margin, torch.tensor(0, device=dist.device))
         return (loss0 * mean_weights).sum() + (loss1 * mean_weights).sum()
+
+    def get_unmatched_margin_loss(self, dist, indexes, mean_weights, zero_to_one=True):
+        margin = self.config['triplet_margin']
+        if margin == -1:
+            return torch.tensor(0, device=dist.device)
+        batch_idx, idx_kpts = indexes
+
+        idx_kpts_closest = torch.argmin(dist, dim=2 if zero_to_one else 1)
+        idx_kpts_neg = idx_kpts_closest[batch_idx, idx_kpts]
+
+        # distance anchor-negative
+        if zero_to_one:
+            dist_an = dist[batch_idx, idx_kpts, idx_kpts_neg]
+        else:
+            dist_an = dist[batch_idx, idx_kpts_neg, idx_kpts]
+
+        loss = torch.maximum(-dist_an + margin, torch.tensor(0, device=dist.device))
+        return (loss * mean_weights).sum()
+
 
 

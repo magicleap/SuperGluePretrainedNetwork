@@ -35,29 +35,34 @@ class SuperPointMatchesGenerator(nn.Module):
         # establish ground truth correspondences given transformation
         kpts0_transformed, mask0 = reproject_keypoints(kpts0, transformation)
         kpts1_transformed, mask1 = reproject_keypoints(kpts1, transformation_inv)
-
         reprojection_error_0_to_1 = torch.cdist(kpts0_transformed, kpts1, p=2)  # batch_size x num0 x num1
         reprojection_error_1_to_0 = torch.cdist(kpts1_transformed, kpts0, p=2)  # batch_size x num1 x num0
 
-        min_dist0, gt_matches0 = reprojection_error_0_to_1.min(2)  # batch_size x num0
-        min_dist1, gt_matches1 = reprojection_error_1_to_0.min(2)  # batch_size x num1
-        # remove matches that don't satisfy cross-check
+        min_dist0, nn_matches0 = reprojection_error_0_to_1.min(2)  # batch_size x num0
+        min_dist1, nn_matches1 = reprojection_error_1_to_0.min(2)  # batch_size x num1
+        gt_matches0, gt_matches1 = nn_matches0.clone(), nn_matches1.clone()
         device = gt_matches0.device
-        cross_check_inconsistent = torch.arange(num0, device=device).unsqueeze(0) != gt_matches1.gather(1, gt_matches0)
-        gt_matches0[cross_check_inconsistent] = self.UNMATCHED_INDEX
-        # remove matches with large distance
-        gt_matches0[min_dist0 > self.gt_positive_threshold] = self.IGNORE_INDEX
-        gt_matches0[min_dist0 > self.gt_negative_threshold] = self.UNMATCHED_INDEX
+        cross_check_consistent0 = torch.arange(num0, device=device).unsqueeze(0) == gt_matches1.gather(1, gt_matches0)
+        gt_matches0[~cross_check_consistent0] = self.UNMATCHED_INDEX
+
+        cross_check_consistent1 = torch.arange(num1, device=device).unsqueeze(0) == gt_matches0.gather(1, gt_matches1)
+        gt_matches1[~cross_check_consistent1] = self.UNMATCHED_INDEX
+
+        symmetric_dist = 0.5 * (min_dist0[cross_check_consistent0] + min_dist1[cross_check_consistent1])
+
+        gt_matches0[cross_check_consistent0][symmetric_dist > self.gt_positive_threshold] = self.IGNORE_INDEX
+        gt_matches0[cross_check_consistent0][symmetric_dist > self.gt_negative_threshold] = self.UNMATCHED_INDEX
+
+        gt_matches1[cross_check_consistent1][symmetric_dist > self.gt_positive_threshold] = self.IGNORE_INDEX
+        gt_matches1[cross_check_consistent1][symmetric_dist > self.gt_negative_threshold] = self.UNMATCHED_INDEX
+
+        # ignore kpts with unknown depth data
         gt_matches0[~mask0] = self.IGNORE_INDEX
+        gt_matches1[~mask1] = self.IGNORE_INDEX
 
-        # make matches for kpts1
-        gt_matches1.fill_(self.IGNORE_INDEX)
-        gt_matches1[min_dist1 > self.gt_negative_threshold] = self.UNMATCHED_INDEX
-
-        batch_idx, kpts0_idx = torch.where(gt_matches0 >= 0) # matched keypoints
-        kpts1_idx = gt_matches0[batch_idx, kpts0_idx]
-        gt_matches1[batch_idx, kpts1_idx] = kpts0_idx
-
+        # also ignore point if its nearest neighbor is invalid
+        gt_matches0[~mask1.gather(1, nn_matches0)] = self.IGNORE_INDEX
+        gt_matches1[~mask0.gather(1, nn_matches1)] = self.IGNORE_INDEX
 
         return {
             **data,

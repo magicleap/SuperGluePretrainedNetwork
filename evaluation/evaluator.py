@@ -24,7 +24,7 @@ class Evaluator:
         timer = AverageTimer(newline=True)
 
         matching = Matching(self.config).eval().to(self.device)
-
+        self.matching = matching
         for i, data_dict in tqdm.tqdm(enumerate(dataloader), total=len(dataloader)):
             # Load the image pair
             img1, img2 = data_dict['image0'].to(self.device), data_dict['image1'].to(self.device)

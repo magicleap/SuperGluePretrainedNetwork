@@ -18,12 +18,12 @@ if __name__ == '__main__':
         '--scenes_txt', type=str, default='/home/ostap/projects/DepthGlue/assets/new_megadepth_validation_scenes.txt',
         help='Path to the file with scenes names')
     parser.add_argument(
-        '--size_image', type=int, default=[640, 480],
+        '--size_image', type=int, default=[960, 720],
         help='Target size')
 
     parser.add_argument(
         '--superglue',
-        default='/home/ostap/logs/superglue/pairs3d/2021-04-25-20-47-57/superglue_outdoor_iter_7500.pth',
+        default='/home/ostap/logs/superglue/pairs3d/2021-05-07-22-45-03/superglue_outdoor_iter_25000.pth',
         help='SuperGlue weights')
     parser.add_argument(
         '--max_keypoints', type=int, default=1024,
@@ -71,7 +71,7 @@ if __name__ == '__main__':
         root_path=opt.data_dir,
         scenes_list=scenes_list,
         target_size=opt.size_image,
-        train=False
+        # train=False
     )
 
     dataloader = torch.utils.data.DataLoader(
