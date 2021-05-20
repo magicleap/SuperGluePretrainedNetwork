@@ -41,7 +41,6 @@
 # %BANNER_END%
 
 from copy import deepcopy
-from pathlib import Path
 import torch
 from torch import nn
 
@@ -178,7 +177,6 @@ def arange_like(x, dim: int):
 
 class SuperGlue(nn.Module):
     """SuperGlue feature matching middle-end
-
     Given two sets of keypoints and locations, we determine the
     correspondences by:
       1. Keypoint Encoding (normalization + visual feature and location fusion)
@@ -186,13 +184,10 @@ class SuperGlue(nn.Module):
       3. Final projection layer
       4. Optimal Transport Layer (a differentiable Hungarian matching algorithm)
       5. Thresholding matrix based on mutual exclusivity and a match_threshold
-
     The correspondence ids use -1 to indicate non-matching points.
-
     Paul-Edouard Sarlin, Daniel DeTone, Tomasz Malisiewicz, and Andrew
     Rabinovich. SuperGlue: Learning Feature Matching with Graph Neural
     Networks. In CVPR, 2020. https://arxiv.org/abs/1911.11763
-
     """
     default_config = {
         'descriptor_dim': 256,
@@ -200,6 +195,7 @@ class SuperGlue(nn.Module):
         'GNN_layers': ['self', 'cross'] * 9,
         'sinkhorn_iterations': 100,
         'match_threshold': 0.2,
+        'weights': 'none'
     }
 
     def __init__(self, config):
@@ -219,22 +215,31 @@ class SuperGlue(nn.Module):
         bin_score = torch.nn.Parameter(torch.tensor(1.))
         self.register_parameter('bin_score', bin_score)
 
-        # load weights is path is given
-        if self.config.get('weights', None) is not None:
-            path = self.config['weights']
-            self.load_state_dict(torch.load(str(path)))
-            print('Loaded SuperGlue model (\"{}\" weights)'.format(
-                self.config['weights']))
+        if self.config['weights'] != 'none':
+            self.load_state_dict(torch.load(str(self.config['weights']), map_location='cpu'))
+            print('Loaded SuperGlue model (\"{}\" weights)'.format(self.config['weights']))
 
-    def _get_matching_scores(self, data):
+    def forward(self, data):
+        """Run SuperGlue on a pair of keypoints and descriptors"""
+        desc0, desc1 = data['descriptors0'], data['descriptors1']
+        kpts0, kpts1 = data['keypoints0'], data['keypoints1']
+
+        if kpts0.shape[1] == 0 or kpts1.shape[1] == 0:  # no keypoints
+            shape0, shape1 = kpts0.shape[:-1], kpts1.shape[:-1]
+            return {
+                'matches0': kpts0.new_full(shape0, -1, dtype=torch.int),
+                'matches1': kpts1.new_full(shape1, -1, dtype=torch.int),
+                'matching_scores0': kpts0.new_zeros(shape0),
+                'matching_scores1': kpts1.new_zeros(shape1),
+            }
 
         # Keypoint normalization.
-        kpts0 = normalize_keypoints(data['keypoints0'], data['image0'].shape)
-        kpts1 = normalize_keypoints(data['keypoints1'], data['image1'].shape)
+        kpts0 = normalize_keypoints(kpts0, data['image0'].shape)
+        kpts1 = normalize_keypoints(kpts1, data['image1'].shape)
 
         # Keypoint MLP encoder.
-        desc0 = data['descriptors0'] + self.kenc(kpts0, data['scores0'])
-        desc1 = data['descriptors1'] + self.kenc(kpts1, data['scores1'])
+        desc0 = desc0 + self.kenc(kpts0, data['scores0'])
+        desc1 = desc1 + self.kenc(kpts1, data['scores1'])
 
         # Multi-layer Transformer network.
         desc0, desc1 = self.gnn(desc0, desc1)
@@ -251,65 +256,8 @@ class SuperGlue(nn.Module):
             scores, self.bin_score,
             iters=self.config['sinkhorn_iterations'])
 
-        return scores
-
-    def forward(self, data):
-        """Run SuperGlue inference on a pair of keypoints and descriptors"""
-        kpts0, kpts1 = data['keypoints0'], data['keypoints1']
-
-        if kpts0.shape[1] == 0 or kpts1.shape[1] == 0:  # no keypoints
-            shape0, shape1 = kpts0.shape[:-1], kpts1.shape[:-1]
-            return {
-                'matches0': kpts0.new_full(shape0, -1, dtype=torch.int),
-                'matches1': kpts1.new_full(shape1, -1, dtype=torch.int),
-                'matching_scores0': kpts0.new_zeros(shape0),
-                'matching_scores1': kpts1.new_zeros(shape1),
-            }
-
-        scores = self._get_matching_scores(data)
-
-        # Get the matches with score above "match_threshold".
-        max0, max1 = scores[:, :-1, :-1].max(2), scores[:, :-1, :-1].max(1)
-        indices0, indices1 = max0.indices, max1.indices
-        mutual0 = arange_like(indices0, 1)[None] == indices1.gather(1, indices0)
-        mutual1 = arange_like(indices1, 1)[None] == indices0.gather(1, indices1)
-        zero = scores.new_tensor(0)
-        mscores0 = torch.where(mutual0, max0.values.exp(), zero)
-        mscores1 = torch.where(mutual1, mscores0.gather(1, indices1), zero)
-        valid0 = mutual0 & (mscores0 > self.config['match_threshold'])
-        valid1 = mutual1 & valid0.gather(1, indices1)
-        indices0 = torch.where(valid0, indices0, indices0.new_tensor(-1))
-        indices1 = torch.where(valid1, indices1, indices1.new_tensor(-1))
-
         return {
-            'matches0': indices0,  # use -1 for invalid match
-            'matches1': indices1,  # use -1 for invalid match
-            'matching_scores0': mscores0,
-            'matching_scores1': mscores1,
-        }
-
-    def training_step(self, data):
-        """Training step of superglue model. Returns loss."""
-
-        if data['keypoints0'].size(1) == 0 or data['keypoints1'].size(1) == 0:
-            return {
-                'skip_train_step': True
-            }
-
-        scores = self._get_matching_scores(data)
-        gt_matches0, gt_matches1 = data['gt_matches0'], data['gt_matches1']
-
-        batch_idx, idx_kpts0 = torch.where(gt_matches0 >= 0)
-        idx_kpts1 = gt_matches0[batch_idx, idx_kpts0]
-        matched_loss = -scores[batch_idx, idx_kpts0, idx_kpts1].sum()
-
-        batch_idx, idx_kpts0 = torch.where(gt_matches0 == -1)
-        unmatched0_loss = -scores[batch_idx, idx_kpts0, -1].sum()
-
-        batch_idx, idx_kpts1 = torch.where(gt_matches1 == -1)
-        unmatched1_loss = -scores[batch_idx, -1, idx_kpts1].sum()
-
-        return {
-            'skip_train_step': False,
-            'loss': (matched_loss + unmatched0_loss + unmatched1_loss) / scores.size(0)
+            'mdesc0': mdesc0,
+            'mdesc1': mdesc1,
+            'scores': scores
         }

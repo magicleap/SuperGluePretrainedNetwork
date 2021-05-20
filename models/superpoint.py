@@ -40,17 +40,17 @@
 # --------------------------------------------------------------------*/
 # %BANNER_END%
 
-from pathlib import Path
 import torch
 from torch import nn
 
+
 def simple_nms(scores, nms_radius: int):
     """ Fast Non-maximum suppression to remove nearby points """
-    assert(nms_radius >= 0)
+    assert (nms_radius >= 0)
 
     def max_pool(x):
         return torch.nn.functional.max_pool2d(
-            x, kernel_size=nms_radius*2+1, stride=1, padding=nms_radius)
+            x, kernel_size=nms_radius * 2 + 1, stride=1, padding=nms_radius)
 
     zeros = torch.zeros_like(scores)
     max_mask = scores == max_pool(scores)
@@ -81,9 +81,9 @@ def sample_descriptors(keypoints, descriptors, s: int = 8):
     """ Interpolate descriptors at keypoint locations """
     b, c, h, w = descriptors.shape
     keypoints = keypoints - s / 2 + 0.5
-    keypoints /= torch.tensor([(w*s - s/2 - 0.5), (h*s - s/2 - 0.5)],
+    keypoints /= torch.tensor([(w * s - s / 2 - 0.5), (h * s - s / 2 - 0.5)],
                               ).to(keypoints)[None]
-    keypoints = keypoints*2 - 1  # normalize to (-1, 1)
+    keypoints = keypoints * 2 - 1  # normalize to (-1, 1)
     args = {'align_corners': True} if int(torch.__version__[2]) > 2 else {}
     descriptors = torch.nn.functional.grid_sample(
         descriptors, keypoints.view(b, 1, -1, 2), mode='bilinear', **args)
@@ -106,6 +106,7 @@ class SuperPoint(nn.Module):
         'keypoint_threshold': 0.005,
         'max_keypoints': -1,
         'remove_borders': 4,
+        'weights': None
     }
 
     def __init__(self, config):
@@ -133,14 +134,13 @@ class SuperPoint(nn.Module):
             c5, self.config['descriptor_dim'],
             kernel_size=1, stride=1, padding=0)
 
-        path = Path(__file__).parent / 'weights/superpoint_v1.pth'
-        self.load_state_dict(torch.load(str(path)))
-
         mk = self.config['max_keypoints']
         if mk == 0 or mk < -1:
             raise ValueError('\"max_keypoints\" must be positive or \"-1\"')
 
-        print('Loaded SuperPoint model')
+        if self.config['weights'] is not None:
+            self.load_state_dict(torch.load(str(self.config['weights']), map_location='cpu'))
+            print('Loaded SuperPoint model')
 
     def forward(self, data):
         """ Compute keypoints, scores, descriptors for image """
@@ -163,7 +163,7 @@ class SuperPoint(nn.Module):
         scores = torch.nn.functional.softmax(scores, 1)[:, :-1]
         b, _, h, w = scores.shape
         scores = scores.permute(0, 2, 3, 1).reshape(b, h, w, 8, 8)
-        scores = scores.permute(0, 1, 3, 2, 4).reshape(b, h*8, w*8)
+        scores = scores.permute(0, 1, 3, 2, 4).reshape(b, h * 8, w * 8)
         scores = simple_nms(scores, self.config['nms_radius'])
 
         # Extract keypoints
@@ -174,7 +174,7 @@ class SuperPoint(nn.Module):
 
         # Discard keypoints near the image borders
         keypoints, scores = list(zip(*[
-            remove_borders(k, s, self.config['remove_borders'], h*8, w*8)
+            remove_borders(k, s, self.config['remove_borders'], h * 8, w * 8)
             for k, s in zip(keypoints, scores)]))
 
         # Keep the k keypoints with highest score
