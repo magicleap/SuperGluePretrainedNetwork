@@ -7,6 +7,7 @@ from models.superglue import SuperGlue
 from utils.train_utils import min_stack, arange_like, get_inverse_transformation, reproject_keypoints
 from utils.losses import criterion
 from utils.geometry import estimate_pose, compute_pose_error, compute_epipolar_error, pose_auc
+from utils.augmentation import SuperAugmentation
 
 
 class MatchingModule(pl.LightningModule):
@@ -18,6 +19,7 @@ class MatchingModule(pl.LightningModule):
         self.config = train_config
         self.superpoint = SuperPoint(superpoint_config)
         self.superglue = SuperGlue(superglue_config)
+        self.aug = SuperAugmentation()
 
     def generate_gt_matches(self, data):
         """Given image pair, keypoints detected in each image, return set of ground truth correspondences"""
@@ -80,8 +82,24 @@ class MatchingModule(pl.LightningModule):
 
         return data, y_true
 
+    def augment(self, batch):
+        image0, transform0 = self.aug(batch['image0'])
+        image1, transform1 = self.aug(batch['image1'])
+
+        batch['image0'] = image0
+        batch['image1'] = image1
+
+        if 'K0' in batch['transformation']:
+            batch['transformation']['K0'] = torch.matmul(transform0, batch['transformation']['K0'])
+        if 'K1' in batch['transformation']:
+            batch['transformation']['K1'] = torch.matmul(transform1, batch['transformation']['K1'])
+        return batch
+
     def training_step(self, batch, batch_idx):
         self.superpoint.eval()
+
+        # batch = self.augment(batch)
+
         with torch.no_grad():
             data, y_true = self.generate_gt_matches(batch)
 
@@ -89,8 +107,8 @@ class MatchingModule(pl.LightningModule):
 
         loss = criterion(y_true, y_pred, margin=self.config['margin'])
 
-        self.log('Train NLL loss', loss['loss'].item(), prog_bar=True, sync_dist=True)
-        self.log('Train Metric loss', loss['metric_loss'].item(), prog_bar=True, sync_dist=True)
+        self.log('Train NLL loss', loss['loss'].detach(), prog_bar=True, sync_dist=True)
+        self.log('Train Metric loss', loss['metric_loss'].detach(), prog_bar=True, sync_dist=True)
 
         return self.config['nll_weight'] * loss['loss'] + self.config['metric_weight'] * loss['metric_loss']
 

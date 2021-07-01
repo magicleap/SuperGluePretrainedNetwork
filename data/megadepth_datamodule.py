@@ -55,7 +55,7 @@ class MegaDepthPairsDataModule(pl.LightningDataModule):
         )
 
     def val_dataloader(self):
-        return DataLoader(self.val_ds, shuffle=False, batch_size=1)
+        return DataLoader(self.val_ds, shuffle=False, batch_size=1, num_workers=1)
 
     def test_dataloader(self):
-        return DataLoader(self.test_ds, shuffle=False, batch_size=1)
+        return DataLoader(self.test_ds, shuffle=False, batch_size=1, num_workers=1)

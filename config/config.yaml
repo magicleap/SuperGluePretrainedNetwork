@@ -13,17 +13,17 @@ data:
 logging:
   root_path: '/home/ostap/logs/superglue/'
   name: 'lightning'
-  val_frequency: 3000
+  val_frequency: 10000
   train_logs_steps: 50
 
 train:
   gt_positive_threshold: 3
-  gt_negative_threshold: 5
+  gt_negative_threshold: 9
   margin: 0.1
-  nll_weight: 1.0
-  metric_weight: 20.0
+  nll_weight: 0.05
+  metric_weight: 1.0
   lr: 1.0e-4
-  scheduler_gamma: 0.999994
+  scheduler_gamma: 0.99998
 
 inference:
   match_threshold: 0.2
@@ -33,9 +33,9 @@ superpoint:
   nms_radius: 4
   keypoint_threshold: 0.
   max_keypoints: 1024
-  weights: '/home/ostap/projects/DepthGlue/models/weights/superpoint_v1.pth'
+  weights: '/home/ostap/projects/SuperGluePretrainedNetwork/models/weights/superpoint_v1.pth'
 
 superglue:
   descriptor_dim: 256
   sinkhorn_iterations: 20
-  weights: 'none'
+  weights: '/home/ostap/projects/SuperGluePretrainedNetwork/models/weights/superglue_outdoor.pth'
