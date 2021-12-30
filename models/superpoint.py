@@ -84,11 +84,7 @@ def sample_descriptors(keypoints, descriptors, s: int = 8):
     keypoints /= torch.tensor([(w*s - s/2 - 0.5), (h*s - s/2 - 0.5)],
                               ).to(keypoints)[None]
     keypoints = keypoints*2 - 1  # normalize to (-1, 1)
-
-    if tuple(map(int, torch.__version__.split('.')[:2])) >= (1, 3):
-        args = {'align_corners': True}
-    else:
-        args = {}
+    args = {'align_corners': True} if torch.__version__ >= '1.3' else {}
     descriptors = torch.nn.functional.grid_sample(
         descriptors, keypoints.view(b, 1, -1, 2), mode='bilinear', **args)
     descriptors = torch.nn.functional.normalize(
