@@ -166,7 +166,7 @@ if __name__ == '__main__':
     # Create a window to display the demo.
     if not opt.no_display:
         cv2.namedWindow('SuperGlue matches', cv2.WINDOW_NORMAL)
-        cv2.resizeWindow('SuperGlue matches', (640*2, 480))
+        cv2.resizeWindow('SuperGlue matches', 640*2, 480)
     else:
         print('Skipping visualization, will not show a GUI.')
 
