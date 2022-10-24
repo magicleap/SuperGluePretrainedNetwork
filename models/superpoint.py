@@ -144,6 +144,8 @@ class SuperPoint(nn.Module):
 
     def forward(self, data):
         """ Compute keypoints, scores, descriptors for image """
+        print('print(data[\'image\'].shape)')
+        print(data['image'].shape)
         # Shared Encoder
         x = self.relu(self.conv1a(data['image']))
         x = self.relu(self.conv1b(x))
@@ -162,14 +164,21 @@ class SuperPoint(nn.Module):
         scores = self.convPb(cPa)
         scores = torch.nn.functional.softmax(scores, 1)[:, :-1]
         b, _, h, w = scores.shape
+        print('print(scores.shape)')
+        print(scores.shape)
         scores = scores.permute(0, 2, 3, 1).reshape(b, h, w, 8, 8)
         scores = scores.permute(0, 1, 3, 2, 4).reshape(b, h*8, w*8)
         scores = simple_nms(scores, self.config['nms_radius'])
 
         # Extract keypoints
-        keypoints = [
-            torch.nonzero(s > self.config['keypoint_threshold'])
-            for s in scores]
+        if 'points' not in data:
+            keypoints = [
+                torch.nonzero(s > self.config['keypoint_threshold'])
+                for s in scores]
+        else:
+            keypoints = [data['points'].long()]
+        print(scores.shape)
+        print(keypoints[0].shape)
         scores = [s[tuple(k.t())] for s, k in zip(scores, keypoints)]
 
         # Discard keypoints near the image borders
