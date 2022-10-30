@@ -144,12 +144,13 @@ class SuperPoint(nn.Module):
 
     def forward(self, data):
         """ Compute keypoints, scores, descriptors for image """
+        # Pad
         x = data['image']
         original_shape = x.shape
-
         w_pad = original_shape[2] % 8
         h_pad = original_shape[3] % 8
         x = nn.functional.pad(x, (0, 0, w_pad, h_pad))
+
         # Shared Encoder
         x = self.relu(self.conv1a(x))
         x = self.relu(self.conv1b(x))
@@ -183,8 +184,6 @@ class SuperPoint(nn.Module):
         scores = [s[tuple(k.t())] for s, k in zip(scores, keypoints)]
 
         # Discard keypoints near the image borders
-        # print(keypoints)
-        # print(scores)
         keypoints, scores = list(zip(*[
             remove_borders(k, s, self.config['remove_borders'], h*8, w*8)
             for k, s in zip(keypoints, scores)]))
