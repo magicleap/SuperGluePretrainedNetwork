@@ -50,6 +50,7 @@ import random
 import numpy as np
 import matplotlib.cm as cm
 import torch
+import pickle
 
 
 from models.matching import Matching
@@ -60,6 +61,15 @@ from models.utils import (compute_pose_error, compute_epipolar_error,
                           scale_intrinsics)
 
 torch.set_grad_enabled(False)
+
+
+def pair_names_to_id(names):
+    # Remove extention
+    names = [str(Path(name).with_suffix('')) for name in names]
+    # Replace '/'
+    names = [name.replace('/', '__') for name in names]
+    # Concat
+    return names[0] + '___' + names[1]
 
 
 if __name__ == '__main__':
@@ -77,6 +87,13 @@ if __name__ == '__main__':
         '--output_dir', type=str, default='dump_match_pairs/',
         help='Path to the directory in which the .npz results and optionally,'
              'the visualization images are written')
+    parser.add_argument(
+        '--input_points', type=str, default=None,
+        help='Path to the directory in which the .pkl files with optional custom keypoints'
+             'are stored. Each file should be named as a <stem0>_<stem1>.pkl of names from'
+             'input_pairs file (the same as a format of output_dir). And each file'
+             'shold contain a pair of [n_points x 2] integer tensors which store'
+             'coordinates of custom keypoints.')
 
     parser.add_argument(
         '--max_length', type=int, default=-1,
@@ -209,11 +226,11 @@ if __name__ == '__main__':
     for i, pair in enumerate(pairs):
         name0, name1 = pair[:2]
         stem0, stem1 = Path(name0).stem, Path(name1).stem
-        matches_path = output_dir / '{}_{}_matches.npz'.format(stem0, stem1)
-        eval_path = output_dir / '{}_{}_evaluation.npz'.format(stem0, stem1)
-        viz_path = output_dir / '{}_{}_matches.{}'.format(stem0, stem1, opt.viz_extension)
-        viz_eval_path = output_dir / \
-            '{}_{}_evaluation.{}'.format(stem0, stem1, opt.viz_extension)
+        pair_id = pair_names_to_id((name0, name1))
+        matches_path = output_dir / f'{pair_id}_matches.npz'
+        eval_path = output_dir / f'{pair_id}_evaluation.npz'
+        viz_path = output_dir / f'{pair_id}_matches.{opt.viz_extension}'
+        viz_eval_path = output_dir / f'{pair_id}_evaluation.{opt.viz_extension}'
 
         # Handle --cache logic.
         do_match = True
@@ -269,17 +286,32 @@ if __name__ == '__main__':
             exit(1)
         timer.update('load_image')
 
+        # Load the optional custom points
+        if opt.input_points is not None:
+            input_points_dir = Path(opt.input_points)
+            with open(input_points_dir / f'{pair_id}.pkl', 'rb') as f:
+                pts0, pts1 = pickle.load(f)
+        else:
+            pts0, pts1 = None, None
+
         if do_match:
             # Perform the matching.
-            pred = matching({'image0': inp0, 'image1': inp1})
+            matching_args = {'image0': inp0, 'image1': inp1}
+            if pts0 is not None:
+                matching_args['points0'] = pts0
+            if pts1 is not None:
+                matching_args['points1'] = pts1
+            pred = matching(matching_args)
             pred = {k: v[0].cpu().numpy() for k, v in pred.items()}
             kpts0, kpts1 = pred['keypoints0'], pred['keypoints1']
             matches, conf = pred['matches0'], pred['matching_scores0']
+            matches1, conf1 = pred['matches1'], pred['matching_scores1']
             timer.update('matcher')
 
             # Write the matches to disk.
             out_matches = {'keypoints0': kpts0, 'keypoints1': kpts1,
-                           'matches': matches, 'match_confidence': conf}
+                           'matches0': matches, 'match_confidence0': conf,
+                           'matches1': matches1, 'match_confidence1': conf1}
             np.savez(str(matches_path), **out_matches)
 
         # Keep the matching keypoints.
