@@ -44,6 +44,7 @@ from pathlib import Path
 import torch
 from torch import nn
 
+
 def simple_nms(scores, nms_radius: int):
     """ Fast Non-maximum suppression to remove nearby points """
     assert(nms_radius >= 0)
