@@ -4,6 +4,8 @@
 
 # SuperGlue Inference and Evaluation Demo Script
 
+- Added GIM lightglue model at [gim-lightglue](models/lightglue.py)
+
 ## Introduction
 SuperGlue is a CVPR 2020 research project done at Magic Leap. The SuperGlue network is a Graph Neural Network combined with an Optimal Matching layer that is trained to perform matching on two sets of sparse image features. This repo includes PyTorch code and pretrained weights for running the SuperGlue matching network on top of [SuperPoint](https://arxiv.org/abs/1712.07629) keypoints and descriptors. Given a pair of images, you can use this repo to extract matching features across the image pair.
 
